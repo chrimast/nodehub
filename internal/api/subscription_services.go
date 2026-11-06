@@ -1,7 +1,7 @@
 package api
 
 import (
-	"github.com/jackc/pgx/v5"
+	"vps-control/internal/store"
 	"net/http"
 	"vps-control/internal/live"
 )
@@ -52,13 +52,13 @@ func (s *Server) subscriptionServices(w http.ResponseWriter, r *http.Request) er
 		seen[service] = true
 		var kind string
 		e = tx.QueryRow(r.Context(), "SELECT kind FROM live_services WHERE tenant_id=$1 AND id=$2", tenant, service).Scan(&kind)
-		if e == pgx.ErrNoRows {
+		if e == store.ErrNoRows {
 			return bad("unknown service")
 		}
 		if e != nil {
 			return e
 		}
-		spec, err := s.loadSpec(r, service)
+		spec, err := s.loadSpecFrom(tx, r.Context(), service)
 		if err != nil {
 			return err
 		}

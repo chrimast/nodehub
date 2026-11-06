@@ -1,14 +1,14 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"encoding/json"
-	"github.com/jackc/pgx/v5"
 	"net/http"
 	"strings"
 	"vps-control/internal/live"
 )
 
-func (s *Server) checkChain(r *http.Request, tx pgx.Tx, id, nextID string) error {
+func (s *Server) checkChain(r *http.Request, tx store.Tx, id, nextID string) error {
 	seen := map[string]bool{id: true}
 	depth := 0
 	for nextID != "" {
@@ -27,7 +27,7 @@ func (s *Server) checkChain(r *http.Request, tx pgx.Tx, id, nextID string) error
 	}
 	return nil
 }
-func (s *Server) ensureNode(r *http.Request, tx pgx.Tx, id, name string, spec live.Spec) (string, error) {
+func (s *Server) ensureNode(r *http.Request, tx store.Tx, id, name string, spec live.Spec) (string, error) {
 	engine := spec.Engine
 	if engine == "" {
 		engine = "sing-box"
@@ -242,7 +242,7 @@ func (s *Server) liveUpdate(w http.ResponseWriter, r *http.Request) error {
 		return e
 	}
 	if b.NextID != "" {
-		next, e := s.loadSpec(r, b.NextID)
+		next, e := s.loadSpecFrom(tx, r.Context(), b.NextID)
 		if e != nil {
 			return e
 		}
@@ -386,7 +386,7 @@ func (s *Server) liveUpdate(w http.ResponseWriter, r *http.Request) error {
 	send(w, 200, map[string]any{"version": version + 1, "enabled": enabled})
 	return nil
 }
-func (s *Server) bumpParents(r *http.Request, tx pgx.Tx, id string) error {
+func (s *Server) bumpParents(r *http.Request, tx store.Tx, id string) error {
 	_, e := tx.Exec(r.Context(), `WITH RECURSIVE parents AS (SELECT id,next_id,1 depth FROM live_services WHERE tenant_id=$1 AND next_id=$2 UNION ALL SELECT l.id,l.next_id,p.depth+1 FROM live_services l JOIN parents p ON l.next_id=p.id WHERE l.tenant_id=$1 AND p.depth<8) UPDATE live_services SET version=version+1,state='pending' WHERE tenant_id=$1 AND id IN (SELECT id FROM parents)`, tenant, id)
 	return e
 }

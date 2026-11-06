@@ -1,14 +1,14 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
 	"vps-control/internal/manifest"
 
-	"github.com/jackc/pgx/v5"
-)
+	)
 
 type commerceRenewalRequest struct {
 	External     string `json:"external_id"`
@@ -48,14 +48,14 @@ func (s *Server) commerceRenewal(w http.ResponseWriter, r *http.Request) error {
 		send(w, 200, previous)
 		return nil
 	}
-	if e != pgx.ErrNoRows {
+	if e != store.ErrNoRows {
 		return e
 	}
 	var expires time.Time
 	var day int
 	var enabled bool
 	e = tx.QueryRow(r.Context(), `SELECT expires_at,enabled FROM proxy_users WHERE tenant_id=$1 AND id=$2 AND external_id=$3 AND commercial_only FOR UPDATE`, tenant, b.User, b.External).Scan(&expires, &enabled)
-	if e == pgx.ErrNoRows {
+	if e == store.ErrNoRows {
 		return problem{409, "renewal identity no longer exists; do not recreate it"}
 	}
 	if e != nil {

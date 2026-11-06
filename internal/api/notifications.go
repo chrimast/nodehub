@@ -1,6 +1,7 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -15,8 +16,7 @@ import (
 	"time"
 	"vps-control/internal/live"
 
-	"github.com/jackc/pgx/v5"
-)
+	)
 
 type notificationConfig struct {
 	Version         int      `json:"version"`
@@ -112,7 +112,7 @@ func (s *Server) notifications(w http.ResponseWriter, r *http.Request) error {
 	}
 	if r.Method == "GET" {
 		c, _, _, e := s.loadNotifications(r.Context())
-		if e == pgx.ErrNoRows {
+		if e == store.ErrNoRows {
 			c = notificationConfig{ReportMinutes: 60, QuotaPercent: 80, AllowedUsers: []int64{}, Commands: []string{"status", "help"}, Events: []string{}, ReportSections: []string{"status", "traffic"}}
 			e = nil
 		}
@@ -164,7 +164,7 @@ func (s *Server) notifications(w http.ResponseWriter, r *http.Request) error {
 	var oldVersion int
 	var sealed []byte
 	e = tx.QueryRow(r.Context(), `SELECT version,sealed FROM notification_settings WHERE tenant_id=$1 FOR UPDATE`, tenant).Scan(&oldVersion, &sealed)
-	if e != nil && e != pgx.ErrNoRows {
+	if e != nil && e != store.ErrNoRows {
 		return e
 	}
 	if oldVersion != c.Version {

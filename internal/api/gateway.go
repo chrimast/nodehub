@@ -1,12 +1,12 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
-	"github.com/jackc/pgx/v5"
-	"net"
+		"net"
 	"net/http"
 	"net/mail"
 	"strings"
@@ -22,7 +22,7 @@ type certificatePair struct {
 func certificateExpiry(value string) (time.Time, error) {
 	block, _ := pem.Decode([]byte(value))
 	if block == nil {
-		return time.Time{}, pgx.ErrNoRows
+		return time.Time{}, store.ErrNoRows
 	}
 	cert, e := x509.ParseCertificate(block.Bytes)
 	if e != nil {
@@ -335,7 +335,7 @@ func (s *Server) gatewayReport(w http.ResponseWriter, r *http.Request) error {
 func (s *Server) reverseProxies(w http.ResponseWriter, r *http.Request) error {
 	return s.reverseManage(w, r)
 }
-func (s *Server) saveManagedCertificate(r *http.Request, tx pgx.Tx, id, domain string, pair certificatePair) error {
+func (s *Server) saveManagedCertificate(r *http.Request, tx store.Tx, id, domain string, pair certificatePair) error {
 	var e error
 	spec := live.Spec{Kind: "trojan", Address: domain, Listen: "127.0.0.1", Port: 25000, Password: live.Secret(), ServerName: domain, Certificate: pair.Certificate, PrivateKey: pair.PrivateKey}
 	if e = spec.Validate(); e != nil {

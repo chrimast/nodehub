@@ -19,7 +19,7 @@ func TestCommerceRenewalOnlyExtendsExistingIdentity(t *testing.T) {
 		t.Fatal(e)
 	}
 	var before, after string
-	query := `SELECT (to_jsonb(u)-'expires_at'-'version')::text FROM proxy_users u WHERE tenant_id=$1 AND id=$2`
+	query := `SELECT json_object('sealed',hex(sealed),'quota_bytes',quota_bytes,'used_bytes',used_bytes,'reset_day',reset_day,'max_devices',max_devices,'billing_mode',billing_mode,'multiplier_milli',multiplier_milli,'enabled',enabled) FROM proxy_users WHERE tenant_id=$1 AND id=$2`
 	if e := f.h.s.DB.QueryRow(ctx, query, tenant, user).Scan(&before); e != nil {
 		t.Fatal(e)
 	}

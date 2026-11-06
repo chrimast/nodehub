@@ -1,4 +1,82 @@
-# 星枢 · VPS 多机管理 0.25.5
+# 星枢 · VPS 多机管理 0.25.5（nodehub / SQLite）
+
+本仓库 `nodehub` 分支是 fork 后的 **SQLite 版**：不部署 PostgreSQL。网页 `IP:18080`，登录令牌为 `ADMIN_TOKEN`。不要和官方一键 `/opt/starhub-control` 装在同一台抢端口。`MASTER_KEY` 部署后不能更换。
+
+## 1Panel Compose 部署
+
+在 1Panel「容器 → Compose」新建应用，编排内容粘贴下面整份 YAML。应用目录可自建空的 `agent-releases/`（没有 Agent 包也能先起面板）。环境变量在同一应用里填写，不要写进 YAML。
+
+需要填写：
+
+- `ADMIN_TOKEN`：至少 32 字节随机串，用来登录网页
+- `MASTER_KEY`：64 位十六进制（AES-256），丢失或更换后无法解密已有凭据
+
+```yaml
+name: nodehub
+services:
+  api:
+    build:
+      context: https://github.com/chrimast/czy-code.git#nodehub
+      dockerfile: Dockerfile
+    image: nodehub-api:nodehub
+    environment:
+      DATABASE_URL: sqlite:///state/nodehub.db
+      MASTER_KEY: ${MASTER_KEY:?set MASTER_KEY (64 hex chars)}
+      SHARE_ADDR: 0.0.0.0:8091
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?set ADMIN_TOKEN (>=32 bytes)}
+      HTTP_ADDR: 0.0.0.0:8080
+      GOMEMLIMIT: 128MiB
+      AGENT_RELEASE_DIR: /app/agent-releases
+    volumes:
+      - nodehub-data:/state
+    mem_limit: 192m
+    pids_limit: 64
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:18091:8091"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+  web:
+    build:
+      context: https://github.com/chrimast/czy-code.git#nodehub:web
+      dockerfile: Dockerfile
+    image: nodehub-web:nodehub
+    ports:
+      - "18080:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: 64m
+    pids_limit: 32
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+volumes:
+  nodehub-data:
+```
+
+生成密钥示例（在本机终端执行，不要把结果提交进仓库）：
+
+```bash
+python3 -c 'import secrets; print("ADMIN_TOKEN="+secrets.token_urlsafe(32)); print("MASTER_KEY="+secrets.token_hex(32))'
+```
+
+部署完成后打开 `http://服务器IP:18080`，用 `ADMIN_TOKEN` 登录。SQLite 文件在 Compose 卷 `nodehub-data` 的 `/state/nodehub.db`。
+
+源码在本仓库根目录时，也可以直接用仓库里的 `compose.yaml`：
+
+```bash
+docker compose up -d --build
+```
+
+官方 PostgreSQL 一键安装脚本不适用于本分支。
 
 补齐 Linux 一键安装的 Nginx、Certbot / Cloudflare DNS 插件与受控网关助手；已有安装可单独修复，保留数据库和令牌。[0.25.5 发布说明](docs/RELEASE-v0255.md)。
 

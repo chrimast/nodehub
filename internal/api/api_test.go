@@ -7,14 +7,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-	"vps-control/internal/store"
+		"vps-control/internal/store"
 )
 
 func TestAuthenticationAndStrictJSON(t *testing.T) {
@@ -42,35 +39,9 @@ func TestAuthenticationAndStrictJSON(t *testing.T) {
 }
 
 func TestIntegration(t *testing.T) {
-	dbURL := os.Getenv("TEST_DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("set TEST_DATABASE_URL to run PostgreSQL integration tests")
-	}
+	db := openTestDB(t)
 	ctx := context.Background()
-	admin, e := pgxpool.New(ctx, dbURL)
-	if e != nil {
-		t.Fatal(e)
-	}
-	defer admin.Close()
-	schema := "test_" + ID()
-	if _, e = admin.Exec(ctx, "CREATE SCHEMA "+schema); e != nil {
-		t.Fatal(e)
-	}
-	defer admin.Exec(ctx, "DROP SCHEMA "+schema+" CASCADE") // generated fixed alphabet only
-	u, e := url.Parse(dbURL)
-	if e != nil {
-		t.Fatal(e)
-	}
-	q := u.Query()
-	q.Set("search_path", schema)
-	u.RawQuery = q.Encode()
-	db, e := store.Open(ctx, u.String())
-	if e != nil {
-		t.Fatal(e)
-	}
-	defer db.Close()
-	// Re-running migrations is a no-op.
-	again, e := store.Open(ctx, u.String())
+	again, e := store.Open(ctx, "sqlite://"+t.TempDir()+"/again.db")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -98,7 +69,7 @@ func TestIntegration(t *testing.T) {
 		defer res.Body.Close()
 		var raw json.RawMessage
 		if res.StatusCode != 204 {
-			if e = json.NewDecoder(res.Body).Decode(&raw); e != nil {
+			if e := json.NewDecoder(res.Body).Decode(&raw); e != nil {
 				t.Fatal(e)
 			}
 		}
@@ -196,7 +167,7 @@ func TestIntegration(t *testing.T) {
 	completePath := "agent/tasks/" + job["id"].(string) + "/complete"
 	post(completePath, map[string]any{"lease_token": claim["lease_token"], "success": true}, 409, other, "")
 	// Expire and reclaim; old lease cannot complete.
-	if _, e = db.Exec(ctx, "UPDATE tasks SET lease_until=now()-interval '1 second' WHERE id=$1", job["id"]); e != nil {
+	if _, e := db.Exec(ctx, "UPDATE tasks SET lease_until=now()-interval '1 second' WHERE id=$1", job["id"]); e != nil {
 		t.Fatal(e)
 	}
 	fresh := post("agent/claim", nil, 200, host, "")
@@ -210,7 +181,7 @@ func TestIntegration(t *testing.T) {
 	// Exhaust leases and release the per-instance active-task constraint.
 	exhausted := post(path+"/deploy", map[string]any{"config_id": cfg2["id"]}, 202, nil, "request-0003")
 	post("agent/claim", nil, 200, host, "")
-	if _, e = db.Exec(ctx, "UPDATE tasks SET attempts=3,lease_until=now()-interval '1 second' WHERE id=$1", exhausted["id"]); e != nil {
+	if _, e := db.Exec(ctx, "UPDATE tasks SET attempts=3,lease_until=now()-interval '1 second' WHERE id=$1", exhausted["id"]); e != nil {
 		t.Fatal(e)
 	}
 	post("agent/claim", nil, 204, host, "")
@@ -269,19 +240,19 @@ func TestIntegration(t *testing.T) {
 	}
 	post("agent/tasks/"+stageClaim["id"].(string)+"/complete", map[string]any{"lease_token": stageClaim["lease_token"], "success": true, "artifact_checksum": strings.Repeat("a", 64)}, 200, host, "")
 	var staged string
-	if e = db.QueryRow(ctx, "SELECT staged_config_id FROM instances WHERE id=$1", instance["id"]).Scan(&staged); e != nil || staged != cfg["id"] {
+	if e := db.QueryRow(ctx, "SELECT staged_config_id FROM instances WHERE id=$1", instance["id"]).Scan(&staged); e != nil || staged != cfg["id"] {
 		t.Fatal(staged, e)
 	}
 	// Reaping does not require any host heartbeat or claim.
 	post(path+"/deploy", map[string]any{"config_id": cfg["id"]}, 202, nil, "offline-reap")
 	stageClaim = post("agent/claim", nil, 200, host, "")
-	if _, e = db.Exec(ctx, "UPDATE tasks SET attempts=3,lease_until=now()-interval '1 second' WHERE id=$1", stageClaim["id"]); e != nil {
+	if _, e := db.Exec(ctx, "UPDATE tasks SET attempts=3,lease_until=now()-interval '1 second' WHERE id=$1", stageClaim["id"]); e != nil {
 		t.Fatal(e)
 	}
-	if e = (&Server{DB: db}).Reap(ctx); e != nil {
+	if e := (&Server{DB: db}).Reap(ctx); e != nil {
 		t.Fatal(e)
 	}
-	if e = db.QueryRow(ctx, "SELECT state FROM tasks WHERE id=$1", stageClaim["id"]).Scan(&state); e != nil || state != "failed" {
+	if e := db.QueryRow(ctx, "SELECT state FROM tasks WHERE id=$1", stageClaim["id"]).Scan(&state); e != nil || state != "failed" {
 		t.Fatal(state, e)
 	}
 	// Enqueue racing with completion must never deadlock or return an internal error.
@@ -347,7 +318,7 @@ func TestIntegration(t *testing.T) {
 		t.Fatal(e)
 	}
 	var snap map[string]any
-	if e = json.NewDecoder(res.Body).Decode(&snap); e != nil {
+	if e := json.NewDecoder(res.Body).Decode(&snap); e != nil {
 		t.Fatal(e)
 	}
 	res.Body.Close()

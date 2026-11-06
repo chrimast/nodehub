@@ -1,17 +1,17 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"encoding/json"
 	"net/http"
 	"reflect"
 
-	"github.com/jackc/pgx/v5"
-	"vps-control/internal/live"
+		"vps-control/internal/live"
 )
 
 // FRP listener reservations are changed only after a confirmed stop. A server with
 // assigned clients retains its immutable connection contract until clients are moved.
-func (s *Server) updateFRP(w http.ResponseWriter, r *http.Request, tx pgx.Tx, b liveInput, raw []byte, enabled bool) error {
+func (s *Server) updateFRP(w http.ResponseWriter, r *http.Request, tx store.Tx, b liveInput, raw []byte, enabled bool) error {
 	var spec live.Spec
 	if e := json.Unmarshal(raw, &spec); e != nil {
 		return e

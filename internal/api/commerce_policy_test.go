@@ -16,10 +16,10 @@ func TestCommercePolicyMovesGroupsPreservesBillingAndStableSubscription(t *testi
 	grant := obj018(f.h.call("POST", "commerce/entitlements", map[string]any{"external_id": external, "order_id": ID(), "name": "policy-fixture", "months": 1, "quota_bytes": 100000000000, "group_ids": []string{f.group}, "protocols": []string{"vmess"}, "max_devices": 3, "billing_mode": "both", "multiplier_milli": 1000}, 200, nil))
 	f.ack()
 	user, sub := grant["user_id"].(string), grant["subscription_id"].(string)
-	f.h.s.DB.Exec(ctx, "UPDATE proxy_users SET used_bytes=1234 WHERE id=$1", user)
+	f.h.s.DB.Exec(ctx, "UPDATE proxy_users SET used_bytes=1234 WHERE tenant_id=$1 AND id=$2", tenant, user)
 	var before []byte
-	query := `SELECT jsonb_build_array(sealed,expires_at,quota_bytes,used_bytes,reset_day,next_reset_at,max_devices,billing_mode,multiplier_milli,enabled) FROM proxy_users WHERE id=$1`
-	if e := f.h.s.DB.QueryRow(ctx, query, user).Scan(&before); e != nil {
+	query := `SELECT json_array(hex(sealed),expires_at,quota_bytes,used_bytes,reset_day,next_reset_at,max_devices,billing_mode,multiplier_milli,enabled) FROM proxy_users WHERE tenant_id=$1 AND id=$2`
+	if e := f.h.s.DB.QueryRow(ctx, query, tenant, user).Scan(&before); e != nil {
 		t.Fatal(e)
 	}
 	node := f.addNode("policy-new-node", 26029)
@@ -37,7 +37,7 @@ func TestCommercePolicyMovesGroupsPreservesBillingAndStableSubscription(t *testi
 		t.Fatal("group edits can overwrite synchronized membership")
 	}
 	var after []byte
-	f.h.s.DB.QueryRow(ctx, query, user).Scan(&after)
+	f.h.s.DB.QueryRow(ctx, query, tenant, user).Scan(&after)
 	if string(before) != string(after) {
 		t.Fatal("policy changed credentials, time or accounting")
 	}

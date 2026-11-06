@@ -1,8 +1,8 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"encoding/json"
-	"github.com/jackc/pgx/v5"
 	"net/http"
 	"sync"
 	"time"
@@ -72,7 +72,7 @@ func (s *Server) verifyControlOrigin(w http.ResponseWriter, r *http.Request) err
 func (s *Server) agentOrigins(r *http.Request) ([]string, error) {
 	var raw json.RawMessage
 	if e := s.DB.QueryRow(r.Context(), `SELECT agent_origins FROM site_settings WHERE tenant_id=$1`, tenant).Scan(&raw); e != nil {
-		if e == pgx.ErrNoRows {
+		if e == store.ErrNoRows {
 			return []string{}, nil
 		}
 		return nil, e

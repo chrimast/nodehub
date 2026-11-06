@@ -1,9 +1,9 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"encoding/json"
 	"fmt"
-	"github.com/jackc/pgx/v5"
 	"net/http"
 	"strings"
 	"vps-control/internal/clientpolicy"
@@ -95,7 +95,7 @@ func (s *Server) policies(w http.ResponseWriter, r *http.Request) error {
 			return e
 		}
 		if tag.RowsAffected() == 0 {
-			return pgx.ErrNoRows
+			return store.ErrNoRows
 		}
 		if e = audit(r.Context(), tx, "admin", "client-policy.delete", id); e != nil {
 			return e
@@ -271,7 +271,7 @@ func (s *Server) selectedPolicy(r *http.Request, user, client string) (*clientpo
 	var source, id string
 	var bindingsRaw, nativeRaw []byte
 	e := s.DB.QueryRow(r.Context(), `SELECT id,source,bindings,native_options FROM client_policies WHERE tenant_id=$1 AND (user_id=$2 OR user_id IS NULL) AND client_id IN ($3,'all') ORDER BY (user_id IS NOT NULL) DESC,(client_id=$3) DESC LIMIT 1`, tenant, user, client).Scan(&id, &source, &bindingsRaw, &nativeRaw)
-	if e == pgx.ErrNoRows {
+	if e == store.ErrNoRows {
 		return nil, nil, nil, "", nil
 	}
 	if e != nil {

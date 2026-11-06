@@ -1,13 +1,13 @@
 package api
 
 import (
-	"github.com/jackc/pgx/v5"
+	"vps-control/internal/store"
 	"net/http"
 	"strings"
 	"vps-control/internal/live"
 )
 
-func requireHopping(r *http.Request, tx pgx.Tx, host string, spec live.Spec) error {
+func requireHopping(r *http.Request, tx store.Tx, host string, spec live.Spec) error {
 	if !spec.RequiresHopping() {
 		return nil
 	}
@@ -21,7 +21,7 @@ func requireHopping(r *http.Request, tx pgx.Tx, host string, spec live.Spec) err
 	return nil
 }
 
-func reserveLivePorts(r *http.Request, tx pgx.Tx, host, id string, spec live.Spec) error {
+func reserveLivePorts(r *http.Request, tx store.Tx, host, id string, spec live.Spec) error {
 	ports := []int32{}
 	for _, p := range spec.ReservedPorts() {
 		ports = append(ports, int32(p))

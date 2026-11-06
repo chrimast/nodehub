@@ -30,7 +30,7 @@ func (s *Server) nginxStatus(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 	var raw json.RawMessage
-	err := s.DB.QueryRow(r.Context(), `SELECT json_build_object('version',nginx_version,'source',nginx_source,'checked_at',nginx_checked_at,'fresh',COALESCE(nginx_checked_at>now()-interval '3 minutes',false),'certbot_available',certbot_available,'cloudflare_available',cloudflare_available) FROM site_settings WHERE tenant_id=$1`, tenant).Scan(&raw)
+	err := s.DB.QueryRow(r.Context(), `SELECT json_object('version',nginx_version,'source',nginx_source,'checked_at',nginx_checked_at,'fresh',json(CASE WHEN COALESCE(nginx_checked_at>now()-interval '3 minutes',0) THEN 'true' ELSE 'false' END),'certbot_available',json(CASE WHEN certbot_available THEN 'true' ELSE 'false' END),'cloudflare_available',json(CASE WHEN cloudflare_available THEN 'true' ELSE 'false' END)) FROM site_settings WHERE tenant_id=$1`, tenant).Scan(&raw)
 	if err != nil {
 		return err
 	}

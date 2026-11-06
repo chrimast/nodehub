@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jackc/pgx/v5"
 	"slices"
 	"strings"
 	"time"
@@ -20,34 +19,19 @@ func (s *Server) RunNotifications(ctx context.Context) {
 		if len(s.MasterKey) == 32 {
 			c, _, _, e := s.loadNotifications(ctx)
 			if e == nil && c.Enabled {
-				// The session lock must not hold a business-pool slot during a
-				// 20-second long poll (including installations with pool_max_conns=1).
-				conn, e := pgx.ConnectConfig(ctx, s.DB.Config().ConnConfig.Copy())
-				if e == nil {
-					var locked bool
-					e = conn.QueryRow(ctx, `SELECT pg_try_advisory_lock(717014)`).Scan(&locked)
-					if e == nil && locked {
-						e = s.notificationStep(ctx)
-						if e != nil {
-							failures++
-							delay = time.Duration(15*min(failures, 20)) * time.Second
-							var apiErr telegramAPIError
-							if errors.As(e, &apiErr) && apiErr.RetryAfter > 0 {
-								delay = time.Duration(min(apiErr.RetryAfter, 3600)) * time.Second
-							}
-						} else {
-							failures = 0
-						}
-						unlock, cancel := context.WithTimeout(context.Background(), time.Second)
-						_, _ = conn.Exec(unlock, `SELECT pg_advisory_unlock(717014)`)
-						cancel()
-						if e == nil && c.CommandPolling {
-							delay = time.Second
-						}
+				e = s.notificationStep(ctx)
+				if e != nil {
+					failures++
+					delay = time.Duration(15*min(failures, 20)) * time.Second
+					var apiErr telegramAPIError
+					if errors.As(e, &apiErr) && apiErr.RetryAfter > 0 {
+						delay = time.Duration(min(apiErr.RetryAfter, 3600)) * time.Second
 					}
-					closing, cancel := context.WithTimeout(context.Background(), time.Second)
-					_ = conn.Close(closing)
-					cancel()
+				} else {
+					failures = 0
+					if c.CommandPolling {
+						delay = time.Second
+					}
 				}
 			}
 		}

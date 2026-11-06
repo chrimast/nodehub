@@ -8,43 +8,18 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"os"
 	"strings"
 	"testing"
 	"time"
-	"vps-control/internal/store"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-)
+	)
 
 type notificationTransport func(*http.Request) (*http.Response, error)
 
 func (f notificationTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 func testControlDB(t *testing.T) *Server {
 	t.Helper()
-	raw := os.Getenv("TEST_DATABASE_URL")
-	if raw == "" {
-		t.Skip("TEST_DATABASE_URL required")
-	}
-	ctx := context.Background()
-	pool, e := pgxpool.New(ctx, raw)
-	if e != nil {
-		t.Fatal(e)
-	}
-	schema := "notify_" + ID()
-	if _, e = pool.Exec(ctx, "CREATE SCHEMA "+schema); e != nil {
-		t.Fatal(e)
-	}
-	u, _ := url.Parse(raw)
-	q := u.Query()
-	q.Set("search_path", schema)
-	u.RawQuery = q.Encode()
-	db, e := store.Open(ctx, u.String())
-	if e != nil {
-		t.Fatal(e)
-	}
-	t.Cleanup(func() { db.Close(); pool.Exec(ctx, "DROP SCHEMA "+schema+" CASCADE"); pool.Close() })
+	db := openTestDB(t)
 	return &Server{DB: db, AdminToken: strings.Repeat("a", 32), MasterKey: bytes.Repeat([]byte{8}, 32)}
 }
 func TestNotificationBindingAndCommands(t *testing.T) {

@@ -1,8 +1,8 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"encoding/json"
-	"github.com/jackc/pgx/v5"
 	"net/http"
 	"slices"
 	"strings"
@@ -44,7 +44,7 @@ func (s *Server) commercePolicy(w http.ResponseWriter, r *http.Request) error {
 	}
 	var id string
 	e = tx.QueryRow(r.Context(), `SELECT id FROM proxy_users WHERE tenant_id=$1 AND id=$2 AND external_id=$3 AND commercial_only FOR UPDATE`, tenant, b.User, b.External).Scan(&id)
-	if e == pgx.ErrNoRows {
+	if e == store.ErrNoRows {
 		return problem{404, "commercial identity no longer exists"}
 	}
 	if e != nil {
@@ -61,7 +61,7 @@ func (s *Server) commercePolicy(w http.ResponseWriter, r *http.Request) error {
 	var source, oldHash string
 	var revision int64
 	e = tx.QueryRow(r.Context(), "SELECT source_id,revision,request_hash FROM commerce_account_policies WHERE tenant_id=$1 AND external_id=$2", tenant, b.External).Scan(&source, &revision, &oldHash)
-	if e != nil && e != pgx.ErrNoRows {
+	if e != nil && e != store.ErrNoRows {
 		return e
 	}
 	if e == nil {

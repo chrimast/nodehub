@@ -1,9 +1,9 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"encoding/json"
 	"fmt"
-	"github.com/jackc/pgx/v5"
 	"net/http"
 	"vps-control/internal/live"
 	"vps-control/internal/manifest"
@@ -58,7 +58,7 @@ func (s *Server) liveBatch(w http.ResponseWriter, r *http.Request) error {
 		send(w, 201, previous)
 		return nil
 	}
-	if e != pgx.ErrNoRows {
+	if e != store.ErrNoRows {
 		return e
 	}
 	host, engine := b.Items[0].HostID, b.Items[0].Engine

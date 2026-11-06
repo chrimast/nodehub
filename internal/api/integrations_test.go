@@ -5,17 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"gopkg.in/yaml.v3"
+		"gopkg.in/yaml.v3"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-	"vps-control/internal/store"
 )
 
 func TestMonthlyCycleCalendar(t *testing.T) {
@@ -34,30 +31,8 @@ func TestMonthlyCycleCalendar(t *testing.T) {
 }
 
 func TestIntegrationPermissionsAndSubscriptions(t *testing.T) {
-	rawURL := os.Getenv("TEST_DATABASE_URL")
-	if rawURL == "" {
-		t.Skip("TEST_DATABASE_URL required")
-	}
+	db := openTestDB(t)
 	ctx := context.Background()
-	pool, e := pgxpool.New(ctx, rawURL)
-	if e != nil {
-		t.Fatal(e)
-	}
-	defer pool.Close()
-	schema := "integration_" + ID()
-	if _, e = pool.Exec(ctx, "CREATE SCHEMA "+schema); e != nil {
-		t.Fatal(e)
-	}
-	defer pool.Exec(ctx, "DROP SCHEMA "+schema+" CASCADE")
-	u, _ := url.Parse(rawURL)
-	q := u.Query()
-	q.Set("search_path", schema)
-	u.RawQuery = q.Encode()
-	db, e := store.Open(ctx, u.String())
-	if e != nil {
-		t.Fatal(e)
-	}
-	defer db.Close()
 	s := &Server{DB: db, AdminToken: strings.Repeat("a", 32), MasterKey: bytes.Repeat([]byte{9}, 32)}
 	handler := s.Handler()
 	request := func(method, path string, body any, token, origin string, want int) *httptest.ResponseRecorder {
@@ -81,14 +56,14 @@ func TestIntegrationPermissionsAndSubscriptions(t *testing.T) {
 	object := func(w *httptest.ResponseRecorder) map[string]any {
 		t.Helper()
 		var m map[string]any
-		if e = json.Unmarshal(w.Body.Bytes(), &m); e != nil {
+		if e := json.Unmarshal(w.Body.Bytes(), &m); e != nil {
 			t.Fatal(e)
 		}
 		return m
 	}
 	sql := func(query string, args ...any) {
 		t.Helper()
-		if _, e = db.Exec(ctx, query, args...); e != nil {
+		if _, e := db.Exec(ctx, query, args...); e != nil {
 			t.Fatal(e)
 		}
 	}
@@ -104,7 +79,7 @@ func TestIntegrationPermissionsAndSubscriptions(t *testing.T) {
 	key := object(call("POST", "api-keys", keyBody, 201))
 	token, kid := key["token"].(string), key["id"].(string)
 	var stored string
-	if e = db.QueryRow(ctx, `SELECT token_hash FROM api_keys WHERE id=$1`, kid).Scan(&stored); e != nil || stored == token || stored != Hash(token) {
+	if e := db.QueryRow(ctx, `SELECT token_hash FROM api_keys WHERE id=$1`, kid).Scan(&stored); e != nil || stored == token || stored != Hash(token) {
 		t.Fatal("key storage")
 	}
 	request("GET", "proxy-users", nil, token, "", 200)
@@ -120,7 +95,7 @@ func TestIntegrationPermissionsAndSubscriptions(t *testing.T) {
 	}
 	call("DELETE", "api-keys/"+kid, nil, 200)
 	var remaining int
-	if e = db.QueryRow(ctx, "SELECT count(*) FROM api_keys WHERE tenant_id=$1 AND id=$2", tenant, kid).Scan(&remaining); e != nil || remaining != 0 {
+	if e := db.QueryRow(ctx, "SELECT count(*) FROM api_keys WHERE tenant_id=$1 AND id=$2", tenant, kid).Scan(&remaining); e != nil || remaining != 0 {
 		t.Fatal("deleted API key remains in storage", e)
 	}
 	if strings.Contains(call("GET", "api-keys", nil, 200).Body.String(), kid) {
@@ -147,7 +122,7 @@ func TestIntegrationPermissionsAndSubscriptions(t *testing.T) {
 	batch := map[string]any{"items": []any{first, second}, "start_port": 25000, "request_key": ID()}
 	call("POST", "live/batch", batch, 400)
 	var n int
-	if e = db.QueryRow(ctx, `SELECT count(*) FROM live_services`).Scan(&n); e != nil || n != 0 {
+	if e := db.QueryRow(ctx, `SELECT count(*) FROM live_services`).Scan(&n); e != nil || n != 0 {
 		t.Fatal("batch partially saved")
 	}
 	second["tls_mode"] = "none"
@@ -184,7 +159,7 @@ func TestIntegrationPermissionsAndSubscriptions(t *testing.T) {
 		t.Fatal("Clash metadata or format", header)
 	}
 	var mh map[string]any
-	if e = yaml.Unmarshal(w.Body.Bytes(), &mh); e != nil {
+	if e := yaml.Unmarshal(w.Body.Bytes(), &mh); e != nil {
 		t.Fatal(e)
 	}
 	// Manual YAML source round trips, is merged, and cannot replace generated credentials.
@@ -235,15 +210,15 @@ func TestIntegrationPermissionsAndSubscriptions(t *testing.T) {
 	uid := user["id"].(string)
 	call("POST", "user-groups", map[string]any{"name": "allowed", "user_ids": []string{uid}, "service_ids": []string{items[1].(map[string]any)["id"].(string)}}, 200)
 	var anchor, next time.Time
-	if e = db.QueryRow(ctx, `SELECT reset_anchor_at,next_reset_at FROM proxy_users WHERE id=$1`, uid).Scan(&anchor, &next); e != nil || !next.Equal(NextMonthlyReset(anchor, anchor)) {
+	if e := db.QueryRow(ctx, `SELECT reset_anchor_at,next_reset_at FROM proxy_users WHERE id=$1`, uid).Scan(&anchor, &next); e != nil || !next.Equal(NextMonthlyReset(anchor, anchor)) {
 		t.Fatal("initial rolling cycle", e)
 	}
 	sql(`UPDATE proxy_users SET used_bytes=700,lifetime_bytes=1700,upload_bytes=300,download_bytes=400,next_reset_at=now()-interval '1 second' WHERE id=$1`, uid)
-	if e = s.Reap(ctx); e != nil {
+	if e := s.Reap(ctx); e != nil {
 		t.Fatal(e)
 	}
 	var used, lifetime int64
-	if e = db.QueryRow(ctx, `SELECT used_bytes,lifetime_bytes,next_reset_at FROM proxy_users WHERE id=$1`, uid).Scan(&used, &lifetime, &next); e != nil || used != 0 || lifetime != 1700 || !next.After(time.Now()) {
+	if e := db.QueryRow(ctx, `SELECT used_bytes,lifetime_bytes,next_reset_at FROM proxy_users WHERE id=$1`, uid).Scan(&used, &lifetime, &next); e != nil || used != 0 || lifetime != 1700 || !next.After(time.Now()) {
 		t.Fatal("automatic reset", used, lifetime, e)
 	}
 	editBody := map[string]any{"name": "bound user", "profile_id": pid, "expires_at": time.Now().Add(time.Hour), "user_id": uid, "version": 1}

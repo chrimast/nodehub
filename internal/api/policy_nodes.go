@@ -1,8 +1,8 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"encoding/json"
-	"github.com/jackc/pgx/v5"
 	"net/http"
 	"vps-control/internal/clientpolicy"
 	"vps-control/internal/live"
@@ -47,7 +47,7 @@ func (s *Server) policyNodes(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func prunePolicyNodes(r *http.Request, tx pgx.Tx, ids map[string]bool) error {
+func prunePolicyNodes(r *http.Request, tx store.Tx, ids map[string]bool) error {
 	for id := range ids {
 		if _, e := tx.Exec(r.Context(), `UPDATE user_devices SET service_ids=service_ids-$2,version=version+1 WHERE tenant_id=$1 AND service_ids ? $2`, tenant, id); e != nil {
 			return e

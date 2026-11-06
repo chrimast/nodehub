@@ -4,43 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"gopkg.in/yaml.v3"
+		"gopkg.in/yaml.v3"
 	"net/http/httptest"
-	"net/url"
-	"os"
 	"strings"
 	"testing"
 	"time"
 	"vps-control/internal/live"
-	"vps-control/internal/store"
 )
 
 func TestHostKernelUsersIntegration(t *testing.T) {
-	dbURL := os.Getenv("TEST_DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("TEST_DATABASE_URL required")
-	}
+	db := openTestDB(t)
 	ctx := context.Background()
-	pool, e := pgxpool.New(ctx, dbURL)
-	if e != nil {
-		t.Fatal(e)
-	}
-	defer pool.Close()
-	schema := "users_" + ID()
-	if _, e = pool.Exec(ctx, "CREATE SCHEMA "+schema); e != nil {
-		t.Fatal(e)
-	}
-	defer pool.Exec(ctx, "DROP SCHEMA "+schema+" CASCADE")
-	u, _ := url.Parse(dbURL)
-	q := u.Query()
-	q.Set("search_path", schema)
-	u.RawQuery = q.Encode()
-	db, e := store.Open(ctx, u.String())
-	if e != nil {
-		t.Fatal(e)
-	}
-	defer db.Close()
 	s := &Server{DB: db, AdminToken: strings.Repeat("a", 32), MasterKey: bytes.Repeat([]byte{7}, 32)}
 	admin, public := s.Handler(), s.ShareHandler()
 	call := func(method, path string, body any, status int, agent map[string]any) []byte {
@@ -64,14 +38,14 @@ func TestHostKernelUsersIntegration(t *testing.T) {
 		var m map[string]any
 		if e := json.Unmarshal(raw, &m); e != nil {
 			var value any
-			if e = yaml.Unmarshal(raw, &value); e != nil {
+			if e := yaml.Unmarshal(raw, &value); e != nil {
 				t.Fatal(e)
 			}
 			normalized, err := json.Marshal(value)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if e = json.Unmarshal(normalized, &m); e != nil {
+			if e := json.Unmarshal(normalized, &m); e != nil {
 				t.Fatal(e)
 			}
 		}
@@ -96,7 +70,7 @@ func TestHostKernelUsersIntegration(t *testing.T) {
 	call("POST", "subscriptions", map[string]any{"name": "unsafe shared", "service_ids": []any{a["id"]}, "days": 30}, 400, nil)
 	raw := call("POST", "agent/live/sync", map[string]any{"reports": []any{}, "bundle_mode": true}, 200, h1)
 	var bundles []live.Work
-	if e = json.Unmarshal(raw, &bundles); e != nil {
+	if e := json.Unmarshal(raw, &bundles); e != nil {
 		t.Fatal(e)
 	}
 	if len(bundles) != 1 || len(bundles[0].Members) != 1 || bundles[0].Members[0].ID != a["id"] || bundles[0].Spec.Engine != "sing-box" {
@@ -225,7 +199,7 @@ func TestHostKernelUsersIntegration(t *testing.T) {
 	call("POST", "agent/telemetry", batch, 200, h2)
 	call("POST", "agent/telemetry", batch, 200, h2)
 	var used, lifetime int64
-	if e = db.QueryRow(ctx, `SELECT used_bytes,lifetime_bytes FROM proxy_users WHERE tenant_id=$1 AND id=$2`, tenant, qid).Scan(&used, &lifetime); e != nil || used != 700 || lifetime != 700 {
+	if e := db.QueryRow(ctx, `SELECT used_bytes,lifetime_bytes FROM proxy_users WHERE tenant_id=$1 AND id=$2`, tenant, qid).Scan(&used, &lifetime); e != nil || used != 700 || lifetime != 700 {
 		t.Fatal("retry double-billed", used, lifetime, e)
 	}
 	baseline := call("POST", "agent/telemetry/baseline", nil, 200, h2)
@@ -247,18 +221,18 @@ func TestHostKernelUsersIntegration(t *testing.T) {
 	}
 	call("POST", "proxy-users/"+qid+"/reset-traffic", map[string]any{}, 200, nil)
 	call("POST", "agent/telemetry", batch, 200, h2)
-	if e = db.QueryRow(ctx, `SELECT used_bytes,lifetime_bytes FROM proxy_users WHERE tenant_id=$1 AND id=$2`, tenant, qid).Scan(&used, &lifetime); e != nil || used != 0 || lifetime != 1300 {
+	if e := db.QueryRow(ctx, `SELECT used_bytes,lifetime_bytes FROM proxy_users WHERE tenant_id=$1 AND id=$2`, tenant, qid).Scan(&used, &lifetime); e != nil || used != 0 || lifetime != 1300 {
 		t.Fatal("manual reset reapplied old counters", used, lifetime, e)
 	}
 	batch.Counters[0].Down = 900
 	call("POST", "agent/telemetry", batch, 200, h2)
-	if _, e = db.Exec(ctx, `UPDATE proxy_users SET last_reset_at=now()-interval '2 days' WHERE tenant_id=$1 AND id=$2`, tenant, qid); e != nil {
+	if _, e := db.Exec(ctx, `UPDATE proxy_users SET last_reset_at=now()-interval '2 days' WHERE tenant_id=$1 AND id=$2`, tenant, qid); e != nil {
 		t.Fatal(e)
 	}
-	if e = s.Reap(ctx); e != nil {
+	if e := s.Reap(ctx); e != nil {
 		t.Fatal(e)
 	}
-	if e = db.QueryRow(ctx, `SELECT used_bytes FROM proxy_users WHERE tenant_id=$1 AND id=$2`, tenant, qid).Scan(&used); e != nil || used != 0 {
+	if e := db.QueryRow(ctx, `SELECT used_bytes FROM proxy_users WHERE tenant_id=$1 AND id=$2`, tenant, qid).Scan(&used); e != nil || used != 0 {
 		t.Fatal("automatic quota reset", used, e)
 	}
 	call("GET", "dashboard", nil, 200, nil)

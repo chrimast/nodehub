@@ -1,11 +1,11 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"github.com/jackc/pgx/v5"
 	"net/http"
 	"strings"
 	"time"
@@ -29,7 +29,7 @@ func (s *Server) users(w http.ResponseWriter, r *http.Request) error {
 				return e
 			}
 			if len(rows) == 0 {
-				return pgx.ErrNoRows
+				return store.ErrNoRows
 			}
 			send(w, 200, rows[0])
 		} else {
@@ -97,7 +97,7 @@ func (s *Server) users(w http.ResponseWriter, r *http.Request) error {
 			send(w, 200, map[string]any{"id": oldID, "replayed": true})
 			return nil
 		}
-		if err != pgx.ErrNoRows {
+		if err != store.ErrNoRows {
 			return err
 		}
 	}
@@ -396,7 +396,7 @@ func (s *Server) groups(w http.ResponseWriter, r *http.Request) error {
 	send(w, 200, map[string]string{"id": id})
 	return nil
 }
-func (s *Server) materializeAccounts(r *http.Request, tx pgx.Tx, id string, spec *live.Spec) error {
+func (s *Server) materializeAccounts(r *http.Request, tx store.Tx, id string, spec *live.Spec) error {
 	if !spec.ManagedUsers {
 		return nil
 	}

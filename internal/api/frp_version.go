@@ -1,12 +1,12 @@
 package api
 
 import (
-	"github.com/jackc/pgx/v5"
+	"vps-control/internal/store"
 	"net/http"
 	"vps-control/internal/live"
 )
 
-func requireFRPVersion(r *http.Request, tx pgx.Tx, host string, spec live.Spec) error {
+func requireFRPVersion(r *http.Request, tx store.Tx, host string, spec live.Spec) error {
 	if !hasFRPUDP(spec) {
 		return nil
 	}

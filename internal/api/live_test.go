@@ -4,41 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"strings"
 	"testing"
-	"vps-control/internal/store"
 )
 
 func TestLiveIntegration(t *testing.T) {
-	dbURL := os.Getenv("TEST_DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("set TEST_DATABASE_URL")
-	}
+	db := openTestDB(t)
 	ctx := context.Background()
-	pool, e := pgxpool.New(ctx, dbURL)
-	if e != nil {
-		t.Fatal(e)
-	}
-	defer pool.Close()
-	schema := "live_" + ID()
-	if _, e = pool.Exec(ctx, "CREATE SCHEMA "+schema); e != nil {
-		t.Fatal(e)
-	}
-	defer pool.Exec(ctx, "DROP SCHEMA "+schema+" CASCADE")
-	u, _ := url.Parse(dbURL)
-	q := u.Query()
-	q.Set("search_path", schema)
-	u.RawQuery = q.Encode()
-	db, e := store.Open(ctx, u.String())
-	if e != nil {
-		t.Fatal(e)
-	}
-	defer db.Close()
 	s := &Server{DB: db, AdminToken: strings.Repeat("a", 32), MasterKey: bytes.Repeat([]byte{1}, 32)}
 	admin := s.Handler()
 	public := s.ShareHandler()
@@ -125,7 +100,7 @@ func TestLiveIntegration(t *testing.T) {
 	share(link, 404)
 	link = rotated["url"].(string)
 	share(link, 200)
-	if _, e = db.Exec(ctx, "UPDATE live_services SET reported_at=now()-interval '2 minutes' WHERE id=$1", a["id"]); e != nil {
+	if _, e := db.Exec(ctx, "UPDATE live_services SET reported_at=now()-interval '2 minutes' WHERE id=$1", a["id"]); e != nil {
 		t.Fatal(e)
 	}
 	share(link, 503)
@@ -214,7 +189,7 @@ func TestLiveIntegration(t *testing.T) {
 		t.Fatal("management accessible on sharing listener")
 	}
 	var sealed []byte
-	if e = db.QueryRow(ctx, "SELECT sealed FROM live_services WHERE id=$1", a["id"]).Scan(&sealed); e != nil || bytes.Contains(sealed, []byte("password")) {
+	if e := db.QueryRow(ctx, "SELECT sealed FROM live_services WHERE id=$1", a["id"]).Scan(&sealed); e != nil || bytes.Contains(sealed, []byte("password")) {
 		t.Fatal("plaintext persisted")
 	}
 }

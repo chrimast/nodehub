@@ -1,9 +1,9 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"context"
 	"encoding/json"
-	"github.com/jackc/pgx/v5"
 	"net/http"
 	"regexp"
 	"slices"
@@ -187,7 +187,7 @@ func (s *Server) authenticateAPI(r *http.Request) (apiIdentity, error) {
 	var identity apiIdentity
 	var rate int
 	e := s.DB.QueryRow(r.Context(), `SELECT id,scopes,expires_at,rate_limit FROM api_keys WHERE tenant_id=$1 AND token_hash=$2 AND revoked_at IS NULL AND expires_at>now()`, tenant, Hash(token)).Scan(&identity.ID, &identity.Scopes, &identity.Expires, &rate)
-	if e == pgx.ErrNoRows {
+	if e == store.ErrNoRows {
 		return identity, problem{401, "unauthorized"}
 	}
 	if e != nil {
@@ -262,7 +262,7 @@ func (s *Server) keys(w http.ResponseWriter, r *http.Request) error {
 			return e
 		}
 		if tag.RowsAffected() == 0 {
-			return pgx.ErrNoRows
+			return store.ErrNoRows
 		}
 		if e = audit(r.Context(), tx, "admin", "api-key.delete", id); e != nil {
 			return e

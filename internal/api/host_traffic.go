@@ -1,9 +1,9 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"context"
 	"encoding/json"
-	"github.com/jackc/pgx/v5"
 	"net/http"
 	"slices"
 	"strings"
@@ -28,7 +28,7 @@ func nextHostReset(now time.Time, day int) time.Time {
 	anchor := time.Date(n.Year(), n.Month(), 1, 0, 0, 0, 0, billingLocation)
 	return nextMonthlyResetDay(anchor, now, day)
 }
-func initHostTraffic(ctx context.Context, tx pgx.Tx, id string, in *hostTrafficInput) error {
+func initHostTraffic(ctx context.Context, tx store.Tx, id string, in *hostTrafficInput) error {
 	now := time.Now().In(billingLocation)
 	if _, e := tx.Exec(ctx, `INSERT INTO host_traffic(tenant_id,host_id,reset_day,next_reset_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`, tenant, id, now.Day(), nextHostReset(now, now.Day())); e != nil {
 		return e
@@ -46,7 +46,7 @@ func initHostTraffic(ctx context.Context, tx pgx.Tx, id string, in *hostTrafficI
 	}
 	return nil
 }
-func saveHostTraffic(ctx context.Context, tx pgx.Tx, id string, in hostTrafficInput, fresh bool) error {
+func saveHostTraffic(ctx context.Context, tx store.Tx, id string, in hostTrafficInput, fresh bool) error {
 	if !fresh && in.InitialUsed != nil {
 		return bad("use the calibration endpoint for an existing host")
 	}
@@ -79,7 +79,7 @@ func saveHostTraffic(ctx context.Context, tx pgx.Tx, id string, in hostTrafficIn
 	return e
 }
 
-const hostTrafficJSON = `to_jsonb(t)||jsonb_build_object('remaining_bytes',CASE WHEN t.quota_bytes=0 THEN NULL ELSE GREATEST(t.quota_bytes-t.used_bytes,0) END,'fresh',COALESCE(t.last_sample_at>now()-interval '35 seconds',false),'limited',t.quota_bytes>0 AND t.used_bytes>=t.quota_bytes,'interfaces_available',(SELECT COALESCE(jsonb_agg(jsonb_build_object('name',c.name,'uplink',c.is_uplink,'rx',c.rx,'tx',c.tx,'sampled_at',c.sampled_at) ORDER BY c.name),'[]') FROM host_interface_cursors c WHERE c.tenant_id=t.tenant_id AND c.host_id=t.host_id))`
+const hostTrafficJSON = `json_object('quota_bytes',t.quota_bytes,'used_bytes',t.used_bytes,'remaining_bytes',CASE WHEN t.quota_bytes=0 THEN NULL ELSE max(t.quota_bytes-t.used_bytes,0) END,'fresh',json(CASE WHEN COALESCE(t.last_sample_at>now()-interval '35 seconds',0) THEN 'true' ELSE 'false' END),'limited',json(CASE WHEN t.quota_bytes>0 AND t.used_bytes>=t.quota_bytes THEN 'true' ELSE 'false' END),'display_unit',t.display_unit,'version',t.version,'mode',t.mode,'reset_day',t.reset_day,'auto_reset',json(CASE WHEN t.auto_reset THEN 'true' ELSE 'false' END),'next_reset_at',t.next_reset_at,'lifetime_rx',t.lifetime_rx,'lifetime_tx',t.lifetime_tx,'period_rx',t.period_rx,'period_tx',t.period_tx,'quality',t.quality,'last_sample_at',t.last_sample_at,'interfaces_available',(SELECT COALESCE(json_group_array(json_object('name',c.name,'uplink',json(CASE WHEN c.is_uplink THEN 'true' ELSE 'false' END),'rx',c.rx,'tx',c.tx,'sampled_at',c.sampled_at)),'[]') FROM host_interface_cursors c WHERE c.tenant_id=t.tenant_id AND c.host_id=t.host_id))`
 
 func (s *Server) hostTraffic(w http.ResponseWriter, r *http.Request) error {
 	id := r.PathValue("id")
@@ -153,7 +153,7 @@ func (s *Server) hostTraffic(w http.ResponseWriter, r *http.Request) error {
 	send(w, 200, map[string]bool{"saved": true})
 	return nil
 }
-func resetHostPeriods(ctx context.Context, tx pgx.Tx) error {
+func resetHostPeriods(ctx context.Context, tx store.Tx) error {
 	rows, e := tx.Query(ctx, `SELECT host_id,reset_day FROM host_traffic WHERE tenant_id=$1 AND auto_reset AND next_reset_at<=now() FOR UPDATE`, tenant)
 	if e != nil {
 		return e
@@ -246,7 +246,7 @@ func (s *Server) hostTrafficReport(w http.ResponseWriter, r *http.Request, host 
 	for _, v := range b.Interfaces {
 		var oldRX, oldTX int64
 		err := tx.QueryRow(r.Context(), `SELECT rx,tx FROM host_interface_cursors WHERE tenant_id=$1 AND host_id=$2 AND name=$3 AND epoch=$4`, tenant, host, v.Name, b.Epoch).Scan(&oldRX, &oldTX)
-		if err != nil && err != pgx.ErrNoRows {
+		if err != nil && err != store.ErrNoRows {
 			return err
 		}
 		if v.RX < oldRX || v.TX < oldTX {

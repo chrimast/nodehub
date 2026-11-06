@@ -1,9 +1,9 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"encoding/json"
-	"github.com/jackc/pgx/v5"
-	"net"
+		"net"
 	"net/http"
 	"net/netip"
 	"regexp"
@@ -31,7 +31,7 @@ func (s *Server) panelUpdates(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 		var resources json.RawMessage
-		if err := s.DB.QueryRow(r.Context(), `SELECT database_resources FROM panel_updater WHERE tenant_id=$1`, tenant).Scan(&resources); err != nil && err != pgx.ErrNoRows {
+		if err := s.DB.QueryRow(r.Context(), `SELECT database_resources FROM panel_updater WHERE tenant_id=$1`, tenant).Scan(&resources); err != nil && err != store.ErrNoRows {
 			return err
 		}
 		if len(resources) == 0 {
@@ -133,8 +133,8 @@ func (s *Server) panelWorker(w http.ResponseWriter, r *http.Request) error {
 			return err
 		}
 		var raw json.RawMessage
-		err := s.DB.QueryRow(r.Context(), `WITH candidate AS(SELECT id FROM panel_updates WHERE tenant_id=$1 AND state='queued' ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) UPDATE panel_updates p SET state='downloading',updated_at=now() FROM candidate c WHERE p.tenant_id=$1 AND p.id=c.id RETURNING jsonb_build_object('id',p.id,'from_version',p.from_version,'target_version',p.target_version)`, tenant).Scan(&raw)
-		if err == pgx.ErrNoRows {
+		err := s.DB.QueryRow(r.Context(), `UPDATE panel_updates SET state='downloading',updated_at=now() WHERE tenant_id=$1 AND id=(SELECT id FROM panel_updates WHERE tenant_id=$1 AND state='queued' ORDER BY created_at LIMIT 1) AND state='queued' RETURNING json_object('id',id,'from_version',from_version,'target_version',target_version)`, tenant).Scan(&raw)
+		if err == store.ErrNoRows {
 			send(w, 200, map[string]any{"job": nil})
 			return nil
 		}

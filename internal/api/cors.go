@@ -1,8 +1,8 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"encoding/json"
-	"github.com/jackc/pgx/v5"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -43,7 +43,7 @@ func (s *Server) cors(next http.Handler) http.Handler {
 			var domain string
 			var https bool
 			e := s.DB.QueryRow(r.Context(), `SELECT domain,https FROM site_settings WHERE tenant_id=$1`, tenant).Scan(&domain, &https)
-			if e != nil && e != pgx.ErrNoRows {
+			if e != nil && e != store.ErrNoRows {
 				wrap(func(http.ResponseWriter, *http.Request) error { return e })(w, r)
 				return
 			}
@@ -54,7 +54,7 @@ func (s *Server) cors(next http.Handler) http.Handler {
 			var https bool
 			var raw []byte
 			e := s.DB.QueryRow(r.Context(), `SELECT domain,https,api_origins FROM site_settings WHERE tenant_id=$1`, tenant).Scan(&domain, &https, &raw)
-			if e != nil && e != pgx.ErrNoRows {
+			if e != nil && e != store.ErrNoRows {
 				wrap(func(http.ResponseWriter, *http.Request) error { return e })(w, r)
 				return
 			}

@@ -1,17 +1,17 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"vps-control/internal/live"
+		"vps-control/internal/live"
 )
 
 // The same graph lock protects permission changes, topology edits and stop acknowledgements.
-func graphLock(r *http.Request, tx pgx.Tx) error {
+func graphLock(r *http.Request, tx store.Tx) error {
 	_, e := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(717071)`)
 	return e
 }
@@ -52,7 +52,7 @@ func (s *Server) removeManaged(w http.ResponseWriter, r *http.Request) error {
 		t, err := tx.Exec(r.Context(), `DELETE FROM proxy_users WHERE tenant_id=$1 AND id=$2`, tenant, id)
 		e = err
 		if e == nil && t.RowsAffected() == 0 {
-			return pgx.ErrNoRows
+			return store.ErrNoRows
 		}
 	case "user-groups":
 		if _, e = tx.Exec(r.Context(), `UPDATE live_services SET version=version+1,state='pending' WHERE managed_users AND tenant_id=$1 AND id IN (SELECT service_id FROM user_group_services WHERE tenant_id=$1 AND group_id=$2)`, tenant, id); e != nil {
@@ -61,7 +61,7 @@ func (s *Server) removeManaged(w http.ResponseWriter, r *http.Request) error {
 		t, err := tx.Exec(r.Context(), `DELETE FROM user_groups WHERE tenant_id=$1 AND id=$2`, tenant, id)
 		e = err
 		if e == nil && t.RowsAffected() == 0 {
-			return pgx.ErrNoRows
+			return store.ErrNoRows
 		}
 	case "client-profiles":
 		if _, e = tx.Exec(r.Context(), `UPDATE subscriptions SET profile_id=NULL WHERE tenant_id=$1 AND profile_id=$2`, tenant, id); e != nil {
@@ -70,7 +70,7 @@ func (s *Server) removeManaged(w http.ResponseWriter, r *http.Request) error {
 		t, err := tx.Exec(r.Context(), `DELETE FROM client_profiles WHERE tenant_id=$1 AND id=$2`, tenant, id)
 		e = err
 		if e == nil && t.RowsAffected() == 0 {
-			return pgx.ErrNoRows
+			return store.ErrNoRows
 		}
 	case "subscriptions":
 		var bound bool
@@ -96,7 +96,7 @@ func (s *Server) removeManaged(w http.ResponseWriter, r *http.Request) error {
 		t, err := tx.Exec(r.Context(), `DELETE FROM subscriptions WHERE tenant_id=$1 AND id=$2`, tenant, id)
 		e = err
 		if e == nil && t.RowsAffected() == 0 {
-			return pgx.ErrNoRows
+			return store.ErrNoRows
 		}
 	default:
 		return problem{404, "unknown collection"}
@@ -116,7 +116,7 @@ func (s *Server) removeManaged(w http.ResponseWriter, r *http.Request) error {
 
 func (s *Server) removeHost(w http.ResponseWriter, r *http.Request) error { return s.retirement(w, r) }
 
-func purgeLive(r *http.Request, tx pgx.Tx, id string) error {
+func purgeLive(r *http.Request, tx store.Tx, id string) error {
 	for _, q := range []string{
 		`DELETE FROM traffic_cursors WHERE tenant_id=$1 AND subject_kind='service' AND subject_id=$2`,
 		`DELETE FROM traffic_subjects WHERE tenant_id=$1 AND subject_kind='service' AND subject_id=$2`,
@@ -290,7 +290,7 @@ func (s *Server) subscriptionUpdate(w http.ResponseWriter, r *http.Request) erro
 		return e
 	}
 	if tag.RowsAffected() == 0 {
-		return pgx.ErrNoRows
+		return store.ErrNoRows
 	}
 	if independent && !oldExpiry.Equal(b.Expires) {
 		if e = bumpDeviceUser(r.Context(), tx, oldUser); e != nil {

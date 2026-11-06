@@ -1,8 +1,8 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
-	"github.com/jackc/pgx/v5"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -11,6 +11,7 @@ import (
 	"unicode"
 	"vps-control/internal/controlorigin"
 	"vps-control/internal/live"
+	"vps-control/internal/store"
 )
 
 func (s *Server) liveReady() error {
@@ -24,7 +25,7 @@ func (s *Server) site(w http.ResponseWriter, r *http.Request) error {
 		var domain string
 		https := true
 		e := s.DB.QueryRow(r.Context(), "SELECT domain,https FROM site_settings WHERE tenant_id=$1", tenant).Scan(&domain, &https)
-		if e != nil && e != pgx.ErrNoRows {
+		if e != nil && e != store.ErrNoRows {
 			return e
 		}
 		var actualDomain *string
@@ -34,7 +35,7 @@ func (s *Server) site(w http.ResponseWriter, r *http.Request) error {
 		_ = s.DB.QueryRow(r.Context(), "SELECT gateway_domain,gateway_https,gateway_state,gateway_checked_at FROM site_settings WHERE tenant_id=$1", tenant).Scan(&actualDomain, &actualHTTPS, &state, &checked)
 		var title string
 		var origins json.RawMessage
-		if e = s.DB.QueryRow(r.Context(), `SELECT title,api_origins FROM site_settings WHERE tenant_id=$1`, tenant).Scan(&title, &origins); e != nil && e != pgx.ErrNoRows {
+		if e = s.DB.QueryRow(r.Context(), `SELECT title,api_origins FROM site_settings WHERE tenant_id=$1`, tenant).Scan(&title, &origins); e != nil && e != store.ErrNoRows {
 			return e
 		}
 		if title == "" {
@@ -45,16 +46,16 @@ func (s *Server) site(w http.ResponseWriter, r *http.Request) error {
 		}
 		var shareGatewayDomain, shareGatewayState string
 		var shareGatewayChecked *time.Time
-		if e = s.DB.QueryRow(r.Context(), `SELECT share_gateway_domain,share_gateway_state,share_gateway_checked_at FROM site_settings WHERE tenant_id=$1`, tenant).Scan(&shareGatewayDomain, &shareGatewayState, &shareGatewayChecked); e != nil && e != pgx.ErrNoRows {
+		if e = s.DB.QueryRow(r.Context(), `SELECT share_gateway_domain,share_gateway_state,share_gateway_checked_at FROM site_settings WHERE tenant_id=$1`, tenant).Scan(&shareGatewayDomain, &shareGatewayState, &shareGatewayChecked); e != nil && e != store.ErrNoRows {
 			return e
 		}
 		var ipOrigin, shareDomain string
 		var shareHTTPS bool
-		if e = s.DB.QueryRow(r.Context(), `SELECT ip_origin,share_domain,share_https FROM site_settings WHERE tenant_id=$1`, tenant).Scan(&ipOrigin, &shareDomain, &shareHTTPS); e != nil && e != pgx.ErrNoRows {
+		if e = s.DB.QueryRow(r.Context(), `SELECT ip_origin,share_domain,share_https FROM site_settings WHERE tenant_id=$1`, tenant).Scan(&ipOrigin, &shareDomain, &shareHTTPS); e != nil && e != store.ErrNoRows {
 			return e
 		}
 		var agentOrigins json.RawMessage
-		if e = s.DB.QueryRow(r.Context(), `SELECT agent_origins FROM site_settings WHERE tenant_id=$1`, tenant).Scan(&agentOrigins); e != nil && e != pgx.ErrNoRows {
+		if e = s.DB.QueryRow(r.Context(), `SELECT agent_origins FROM site_settings WHERE tenant_id=$1`, tenant).Scan(&agentOrigins); e != nil && e != store.ErrNoRows {
 			return e
 		}
 		if len(agentOrigins) == 0 {
@@ -217,8 +218,14 @@ func (s *Server) liveList(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 func (s *Server) loadSpec(r *http.Request, id string) (live.Spec, error) {
+	return s.loadSpecFrom(s.DB, r.Context(), id)
+}
+
+func (s *Server) loadSpecFrom(q interface {
+	QueryRow(ctx context.Context, sql string, args ...any) store.Row
+}, ctx context.Context, id string) (live.Spec, error) {
 	var sealed []byte
-	e := s.DB.QueryRow(r.Context(), "SELECT l.sealed FROM live_services l JOIN hosts h ON (l.tenant_id,l.host_id)=(h.tenant_id,h.id) WHERE l.tenant_id=$1 AND l.id=$2 AND h.retire_state='' AND h.deleted_at IS NULL", tenant, id).Scan(&sealed)
+	e := q.QueryRow(ctx, "SELECT l.sealed FROM live_services l JOIN hosts h ON (l.tenant_id,l.host_id)=(h.tenant_id,h.id) WHERE l.tenant_id=$1 AND l.id=$2 AND h.retire_state='' AND h.deleted_at IS NULL", tenant, id).Scan(&sealed)
 	if e != nil {
 		return live.Spec{}, e
 	}
@@ -307,7 +314,7 @@ func (s *Server) liveCreate(w http.ResponseWriter, r *http.Request) error {
 	send(w, 201, created)
 	return nil
 }
-func (s *Server) createLiveTx(r *http.Request, tx pgx.Tx, b liveInput, created *liveCreated) error {
+func (s *Server) createLiveTx(r *http.Request, tx store.Tx, b liveInput, created *liveCreated) error {
 	if len(strings.TrimSpace(b.Name)) == 0 || len([]rune(b.Name)) > 100 {
 		return bad("name required (max 100 characters)")
 	}
@@ -345,7 +352,7 @@ func (s *Server) createLiveTx(r *http.Request, tx pgx.Tx, b liveInput, created *
 		if b.NextID != "" {
 			return bad("FRP client cannot contain route peers")
 		}
-		parent, e := s.loadSpec(r, b.ParentID)
+		parent, e := s.loadSpecFrom(tx, r.Context(), b.ParentID)
 		if e != nil {
 			return e
 		}
@@ -390,7 +397,7 @@ func (s *Server) createLiveTx(r *http.Request, tx pgx.Tx, b liveInput, created *
 		if !live.Proxy(spec.Kind) {
 			return bad("only proxy nodes support a next hop")
 		}
-		next, e := s.loadSpec(r, b.NextID)
+		next, e := s.loadSpecFrom(tx, r.Context(), b.NextID)
 		if e != nil {
 			return e
 		}
@@ -549,7 +556,7 @@ func (s *Server) liveToggle(w http.ResponseWriter, r *http.Request) error {
 			return e
 		}
 		if live.BundleCapable(version) {
-			spec, err := s.loadSpec(r, r.PathValue("id"))
+			spec, err := s.loadSpecFrom(tx, r.Context(), r.PathValue("id"))
 			if err != nil {
 				return err
 			}
@@ -607,7 +614,7 @@ func (s *Server) liveToggle(w http.ResponseWriter, r *http.Request) error {
 			return e
 		}
 		if !exists {
-			return pgx.ErrNoRows
+			return store.ErrNoRows
 		}
 	}
 	if e = audit(r.Context(), tx, "admin", "live.toggle", r.PathValue("id")); e != nil {
@@ -866,9 +873,14 @@ func (s *Server) liveSync(w http.ResponseWriter, r *http.Request, host string) e
 func (s *Server) managementOrigin(r *http.Request) (string, error) { return s.siteOrigin(r, false) }
 func (s *Server) publicOrigin(r *http.Request) (string, error)     { return s.siteOrigin(r, true) }
 func (s *Server) siteOrigin(r *http.Request, share bool) (string, error) {
+	return s.siteOriginFrom(s.DB, r.Context(), share)
+}
+func (s *Server) siteOriginFrom(q interface {
+	QueryRow(ctx context.Context, sql string, args ...any) store.Row
+}, ctx context.Context, share bool) (string, error) {
 	var domain, ipOrigin, sd string
 	var https, sh bool
-	e := s.DB.QueryRow(r.Context(), `SELECT domain,https,ip_origin,share_domain,share_https FROM site_settings WHERE tenant_id=$1`, tenant).Scan(&domain, &https, &ipOrigin, &sd, &sh)
+	e := q.QueryRow(ctx, `SELECT domain,https,ip_origin,share_domain,share_https FROM site_settings WHERE tenant_id=$1`, tenant).Scan(&domain, &https, &ipOrigin, &sd, &sh)
 	if e != nil {
 		return "", e
 	}
@@ -982,7 +994,7 @@ func (s *Server) subscriptionCreate(w http.ResponseWriter, r *http.Request) erro
 			return e
 		}
 		if b.UserID == "" {
-			spec, err := s.loadSpec(r, service)
+			spec, err := s.loadSpecFrom(tx, r.Context(), service)
 			if err != nil {
 				return err
 			}
@@ -1025,7 +1037,7 @@ func (s *Server) subscriptionRevoke(w http.ResponseWriter, r *http.Request) erro
 		return e
 	}
 	if tag.RowsAffected() == 0 {
-		return pgx.ErrNoRows
+		return store.ErrNoRows
 	}
 	if independent {
 		if e = bumpDeviceUser(r.Context(), tx, user); e != nil {
@@ -1062,7 +1074,7 @@ func (s *Server) subscriptionRotate(w http.ResponseWriter, r *http.Request) erro
 		return e
 	}
 	if tag.RowsAffected() == 0 {
-		return pgx.ErrNoRows
+		return store.ErrNoRows
 	}
 	if e = audit(r.Context(), tx, "admin", "subscription.rotate", r.PathValue("id")); e != nil {
 		return e

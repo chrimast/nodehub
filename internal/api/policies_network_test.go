@@ -5,42 +5,16 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"gopkg.in/yaml.v3"
+		"gopkg.in/yaml.v3"
 	"net/http/httptest"
-	"net/url"
-	"os"
 	"strings"
 	"testing"
 	"time"
-	"vps-control/internal/store"
 )
 
 func TestPoliciesNetworksAndRetirement(t *testing.T) {
-	dbURL := os.Getenv("TEST_DATABASE_URL")
-	if dbURL == "" {
-		t.Skip("TEST_DATABASE_URL required")
-	}
+	db := openTestDB(t)
 	ctx := context.Background()
-	pool, e := pgxpool.New(ctx, dbURL)
-	if e != nil {
-		t.Fatal(e)
-	}
-	defer pool.Close()
-	schema := "policy_" + ID()
-	if _, e = pool.Exec(ctx, "CREATE SCHEMA "+schema); e != nil {
-		t.Fatal(e)
-	}
-	defer pool.Exec(ctx, "DROP SCHEMA "+schema+" CASCADE")
-	u, _ := url.Parse(dbURL)
-	q := u.Query()
-	q.Set("search_path", schema)
-	u.RawQuery = q.Encode()
-	db, e := store.Open(ctx, u.String())
-	if e != nil {
-		t.Fatal(e)
-	}
-	defer db.Close()
 	s := &Server{DB: db, AdminToken: strings.Repeat("a", 32), MasterKey: bytes.Repeat([]byte{7}, 32)}
 	admin, public := s.Handler(), s.ShareHandler()
 	call := func(method, path string, body any, status int, agent map[string]any) []byte {
@@ -64,14 +38,14 @@ func TestPoliciesNetworksAndRetirement(t *testing.T) {
 		var m map[string]any
 		if e := json.Unmarshal(raw, &m); e != nil {
 			var value any
-			if e = yaml.Unmarshal(raw, &value); e != nil {
+			if e := yaml.Unmarshal(raw, &value); e != nil {
 				t.Fatal(e)
 			}
 			normalized, err := json.Marshal(value)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if e = json.Unmarshal(normalized, &m); e != nil {
+			if e := json.Unmarshal(normalized, &m); e != nil {
 				t.Fatal(e)
 			}
 		}
@@ -81,7 +55,7 @@ func TestPoliciesNetworksAndRetirement(t *testing.T) {
 	ipv6host := object(call("POST", "hosts", map[string]any{"name": "IPv6 host"}, 201, nil))
 	call("POST", "agent/heartbeat", map[string]any{"version": "0.12.0", "addresses": []string{"172.17.0.1", "2001:db8::9"}}, 200, ipv6host)
 	var primary string
-	if e = db.QueryRow(ctx, `SELECT address FROM hosts WHERE id=$1`, ipv6host["id"]).Scan(&primary); e != nil || primary != "2001:db8::9" {
+	if e := db.QueryRow(ctx, `SELECT address FROM hosts WHERE id=$1`, ipv6host["id"]).Scan(&primary); e != nil || primary != "2001:db8::9" {
 		t.Fatal("IPv6-only host preferred Docker IPv4", primary, e)
 	}
 	h := object(call("POST", "hosts", map[string]any{"name": "fixture", "address": "192.0.2.8"}, 201, nil))
@@ -172,7 +146,7 @@ func TestPoliciesNetworksAndRetirement(t *testing.T) {
 	call("POST", "agent/retirement/ack", receipt, 200, h)
 	call("POST", "agent/retirement/ack", receipt, 200, h)
 	var count int
-	if e = db.QueryRow(ctx, `SELECT count(*) FROM live_services WHERE host_id=$1`, hid).Scan(&count); e != nil || count != 0 {
+	if e := db.QueryRow(ctx, `SELECT count(*) FROM live_services WHERE host_id=$1`, hid).Scan(&count); e != nil || count != 0 {
 		t.Fatal("host config not purged", e)
 	}
 	call("POST", "agent/heartbeat", map[string]any{}, 401, h)

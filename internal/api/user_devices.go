@@ -1,9 +1,9 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"context"
 	"encoding/json"
-	"github.com/jackc/pgx/v5"
 	"net/http"
 	"slices"
 	"strings"
@@ -14,7 +14,7 @@ import (
 
 const deviceLimitSQL = `COALESCE(LEAST(NULLIF(u.max_devices,0),(SELECT min(NULLIF(g.max_devices,0)) FROM user_groups g JOIN user_group_members gm ON (g.tenant_id,g.id)=(gm.tenant_id,gm.group_id) WHERE gm.tenant_id=u.tenant_id AND gm.user_id=u.id)),0)`
 
-func checkDevicePolicies(ctx context.Context, tx pgx.Tx) error {
+func checkDevicePolicies(ctx context.Context, tx store.Tx) error {
 	var invalid bool
 	e := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM proxy_users u WHERE tenant_id=$1 AND `+deviceLimitSQL+`>0 AND CASE WHEN u.device_limit_mode='hwid' THEN (SELECT count(*) FROM user_devices d WHERE d.tenant_id=u.tenant_id AND d.user_id=u.id AND d.enabled) ELSE (SELECT count(*) FROM subscription_clients c WHERE c.tenant_id=u.tenant_id AND c.user_id=u.id AND c.enabled AND c.last_subscription_at>now()-interval '7 days') END>`+deviceLimitSQL+`)`, tenant).Scan(&invalid)
 	if e != nil {
@@ -32,7 +32,7 @@ func checkDevicePolicies(ctx context.Context, tx pgx.Tx) error {
 	}
 	return nil
 }
-func bumpDeviceUser(ctx context.Context, tx pgx.Tx, user string) error {
+func bumpDeviceUser(ctx context.Context, tx store.Tx, user string) error {
 	_, e := tx.Exec(ctx, `UPDATE live_services SET version=version+1,state='pending' WHERE managed_users AND tenant_id=$1 AND id IN(SELECT gs.service_id FROM user_group_services gs JOIN user_group_members gm USING(tenant_id,group_id) WHERE gm.tenant_id=$1 AND gm.user_id=$2)`, tenant, user)
 	return e
 }
@@ -180,7 +180,7 @@ func (s *Server) devices(w http.ResponseWriter, r *http.Request) error {
 		if e != nil {
 			return e
 		}
-		origin, err := s.publicOrigin(r)
+		origin, err := s.siteOriginFrom(tx, r.Context(), true)
 		if err != nil {
 			return err
 		}
@@ -261,7 +261,7 @@ func (s *Server) devices(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func (s *Server) rotateDeviceCredentials(ctx context.Context, tx pgx.Tx, user string) error {
+func (s *Server) rotateDeviceCredentials(ctx context.Context, tx store.Tx, user string) error {
 	rows, e := tx.Query(ctx, `SELECT id FROM user_devices WHERE tenant_id=$1 AND user_id=$2`, tenant, user)
 	if e != nil {
 		return e
@@ -320,7 +320,7 @@ func (s *Server) rotateDeviceCredentials(ctx context.Context, tx pgx.Tx, user st
 }
 
 func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }
-func validateDeviceServices(ctx context.Context, tx pgx.Tx, user string, all bool, ids []string) error {
+func validateDeviceServices(ctx context.Context, tx store.Tx, user string, all bool, ids []string) error {
 	if all {
 		return nil
 	}

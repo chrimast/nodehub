@@ -1,9 +1,9 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"encoding/json"
-	"github.com/jackc/pgx/v5"
-	"net"
+		"net"
 	"net/http"
 	"net/mail"
 	"net/url"
@@ -91,7 +91,7 @@ func (s *Server) reverseManage(w http.ResponseWriter, r *http.Request) error {
 			var a []map[string]any
 			json.Unmarshal(raw, &a)
 			if len(a) == 0 {
-				return pgx.ErrNoRows
+				return store.ErrNoRows
 			}
 			send(w, 200, a[0])
 		} else {
@@ -113,7 +113,7 @@ func (s *Server) reverseManage(w http.ResponseWriter, r *http.Request) error {
 			return e
 		}
 		if tag.RowsAffected() == 0 {
-			return pgx.ErrNoRows
+			return store.ErrNoRows
 		}
 		if e = audit(r.Context(), tx, "admin", "reverse-proxy.delete-request", id); e != nil {
 			return e

@@ -1,7 +1,7 @@
 package api
 
 import (
-	"github.com/jackc/pgx/v5"
+	"vps-control/internal/store"
 	"net/http"
 	"vps-control/internal/live"
 )
@@ -130,7 +130,7 @@ func (s *Server) retirementAgent(w http.ResponseWriter, r *http.Request, host st
 	send(w, 200, map[string]bool{"accepted": true})
 	return nil
 }
-func purgeHost(r *http.Request, tx pgx.Tx, host string) error {
+func purgeHost(r *http.Request, tx store.Tx, host string) error {
 	// Remove only the selected host's data; shared logical nodes remain if referenced elsewhere.
 	var deps bool
 	if e := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM live_services l WHERE l.tenant_id=$1 AND l.host_id<>$2 AND (l.next_id IN(SELECT id FROM live_services WHERE tenant_id=$1 AND host_id=$2) OR l.parent_id IN(SELECT id FROM live_services WHERE tenant_id=$1 AND host_id=$2)))`, tenant, host).Scan(&deps); e != nil {

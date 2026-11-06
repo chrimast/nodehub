@@ -1,6 +1,7 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -17,14 +18,11 @@ import (
 	"vps-control/internal/engine"
 	"vps-control/internal/manifest"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const tenant = "self" // Never accepted from client input. Replace with membership resolution before multi-tenant release.
 type Server struct {
-	DB                   *pgxpool.Pool
+	DB                   *store.DB
 	MasterKey            []byte
 	AdminToken           string
 	AgentReleaseDir      string
@@ -82,12 +80,11 @@ func wrap(f endpoint) http.HandlerFunc {
 		if e := f(w, r); e != nil {
 			status, msg := 500, "internal error"
 			var p problem
-			var db *pgconn.PgError
 			if errors.As(e, &p) {
 				status, msg = p.status, p.message
-			} else if errors.Is(e, pgx.ErrNoRows) {
+			} else if errors.Is(e, store.ErrNoRows) {
 				status, msg = 404, "resource not found"
-			} else if errors.As(e, &db) && (db.Code == "23505" || db.Code == "23503" || db.Code == "23514") {
+			} else if store.IsConstraint(e) {
 				status, msg = 409, "resource conflict or invalid reference"
 			} else {
 				slog.Error("request failed", "error", e)
@@ -113,10 +110,10 @@ func (s *Server) agent(f func(http.ResponseWriter, *http.Request, string) error)
 		host := r.Header.Get("X-Host-ID")
 		var hash string
 		e := s.DB.QueryRow(r.Context(), "SELECT agent_hash FROM hosts WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL", tenant, host).Scan(&hash)
-		if e == pgx.ErrNoRows && r.URL.Path == "/api/v1/agent/retirement/ack" {
+		if e == store.ErrNoRows && r.URL.Path == "/api/v1/agent/retirement/ack" {
 			e = s.DB.QueryRow(r.Context(), `SELECT agent_hash FROM host_retirement_receipts WHERE tenant_id=$1 AND host_id=$2`, tenant, host).Scan(&hash)
 		}
-		if e != nil && !errors.Is(e, pgx.ErrNoRows) {
+		if e != nil && !errors.Is(e, store.ErrNoRows) {
 			return e
 		}
 		header := r.Header.Get("Authorization")
@@ -316,7 +313,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("DELETE /api/v1/{kind}/{id}", s.admin(s.deleteResource))
 	return s.cors(m)
 }
-func audit(ctx context.Context, tx pgx.Tx, actor, action, id string) error {
+func audit(ctx context.Context, tx store.Tx, actor, action, id string) error {
 	_, e := tx.Exec(ctx, "INSERT INTO audit(tenant_id,actor,action,resource_id) VALUES($1,$2,$3,$4)", tenant, actorContext(ctx, actor), action, id)
 	return e
 }
@@ -436,7 +433,7 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request) error {
 	case "instances":
 		var lockedHost string
 		if e = tx.QueryRow(ctx, "SELECT id FROM hosts WHERE tenant_id=$1 AND id=$2 AND retire_state='' FOR UPDATE", tenant, b.HostID).Scan(&lockedHost); e != nil {
-			if errors.Is(e, pgx.ErrNoRows) {
+			if errors.Is(e, store.ErrNoRows) {
 				return problem{409, "host reference does not exist"}
 			}
 			return e
@@ -629,7 +626,7 @@ func (s *Server) deploy(w http.ResponseWriter, r *http.Request) error {
 		send(w, 200, map[string]string{"id": existing})
 		return nil
 	}
-	if !errors.Is(e, pgx.ErrNoRows) {
+	if !errors.Is(e, store.ErrNoRows) {
 		return e
 	}
 	// Lock the instance before validating rollback history and creating an active task.

@@ -30,7 +30,11 @@ func main() {
 	defer stop()
 	startup, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	db, e := store.Open(startup, os.Getenv("DATABASE_URL"))
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		databaseURL = "sqlite:///state/nodehub.db"
+	}
+	db, e := store.Open(startup, databaseURL)
 	if e != nil {
 		log.Fatal(e)
 	}

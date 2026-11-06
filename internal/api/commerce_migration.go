@@ -1,9 +1,9 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"encoding/json"
-	"github.com/jackc/pgx/v5"
-	"math/big"
+		"math/big"
 	"net/http"
 	"strings"
 	"time"
@@ -66,7 +66,7 @@ func (s *Server) commerceMigrateOrders(w http.ResponseWriter, r *http.Request) e
 		send(w, 200, previous)
 		return nil
 	}
-	if e != pgx.ErrNoRows {
+	if e != store.ErrNoRows {
 		return e
 	}
 	var old string

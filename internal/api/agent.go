@@ -1,9 +1,9 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"encoding/json"
 	"errors"
-	"github.com/jackc/pgx/v5"
 	"net/http"
 	"net/netip"
 	"regexp"
@@ -94,7 +94,7 @@ func (s *Server) claim(w http.ResponseWriter, r *http.Request, host string) erro
  WHERE t.tenant_id=$1 AND i.host_id=$2 AND t.state='queued' AND t.attempts<3
  AND (t.mode='simulation' OR h.agent_mode='staging')
  ORDER BY t.created_at,t.id FOR UPDATE OF t SKIP LOCKED LIMIT 1`, tenant, host).Scan(&id, &config, &instance, &mode, &operation)
-	if errors.Is(e, pgx.ErrNoRows) {
+	if errors.Is(e, store.ErrNoRows) {
 		if e = tx.Commit(ctx); e != nil {
 			return e
 		}
@@ -170,7 +170,7 @@ func (s *Server) complete(w http.ResponseWriter, r *http.Request, host string) e
 	var locked string
 	e = tx.QueryRow(ctx, `SELECT i.id FROM instances i JOIN tasks t ON (t.tenant_id,t.instance_id)=(i.tenant_id,i.id)
  WHERE t.tenant_id=$1 AND t.id=$2 AND i.host_id=$3 FOR UPDATE OF i`, tenant, r.PathValue("id"), host).Scan(&locked)
-	if errors.Is(e, pgx.ErrNoRows) {
+	if errors.Is(e, store.ErrNoRows) {
 		return problem{409, "task not owned"}
 	}
 	if e != nil {
@@ -182,7 +182,7 @@ func (s *Server) complete(w http.ResponseWriter, r *http.Request, host string) e
 	e = tx.QueryRow(ctx, `SELECT t.instance_id,t.config_id,t.mode,t.state,t.artifact_checksum,t.lease_token,t.completed_lease,COALESCE(t.lease_until>now(),false)
  FROM tasks t JOIN instances i ON (i.tenant_id,i.id)=(t.tenant_id,t.instance_id)
  WHERE t.tenant_id=$1 AND t.id=$2 AND i.host_id=$3 FOR UPDATE OF t`, tenant, r.PathValue("id"), host).Scan(&instance, &config, &mode, &state, &checksum, &lease, &completed, &live)
-	if errors.Is(e, pgx.ErrNoRows) {
+	if errors.Is(e, store.ErrNoRows) {
 		return problem{409, "task not owned"}
 	}
 	if e != nil {

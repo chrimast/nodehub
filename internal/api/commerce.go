@@ -1,6 +1,7 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -11,8 +12,7 @@ import (
 	"vps-control/internal/live"
 	"vps-control/internal/manifest"
 
-	"github.com/jackc/pgx/v5"
-)
+	)
 
 type commerceSelection struct {
 	Groups    []string `json:"group_ids"`
@@ -39,7 +39,7 @@ func validCommerceSelection(b commerceSelection) error {
 	}
 	return nil
 }
-func (s *Server) commerceNodes(ctx context.Context, tx pgx.Tx, b commerceSelection) (string, error) {
+func (s *Server) commerceNodes(ctx context.Context, tx store.Tx, b commerceSelection) (string, error) {
 	if e := validCommerceSelection(b); e != nil {
 		return "", e
 	}
@@ -171,7 +171,7 @@ func (s *Server) commerceGrant(w http.ResponseWriter, r *http.Request) error {
 	send(w, 200, response)
 	return nil
 }
-func (s *Server) commerceGrantTx(r *http.Request, tx pgx.Tx, b commerceGrantRequest) (json.RawMessage, error) {
+func (s *Server) commerceGrantTx(r *http.Request, tx store.Tx, b commerceGrantRequest) (json.RawMessage, error) {
 	var e error
 	selection := commerceSelection{b.Groups, b.Protocols}
 	requestHash := Hash(string(mustJSON(b)))
@@ -184,7 +184,7 @@ func (s *Server) commerceGrantTx(r *http.Request, tx pgx.Tx, b commerceGrantRequ
 		}
 		return previous, nil
 	}
-	if e != pgx.ErrNoRows {
+	if e != store.ErrNoRows {
 		return nil, e
 	}
 	if b.SeedExpiry.IsZero() {
@@ -201,7 +201,7 @@ func (s *Server) commerceGrantTx(r *http.Request, tx pgx.Tx, b commerceGrantRequ
 	var commercial bool
 	var anchorDay int
 	e = tx.QueryRow(r.Context(), "SELECT id,expires_at,commercial_only,reset_day FROM proxy_users WHERE tenant_id=$1 AND external_id=$2 FOR UPDATE", tenant, b.External).Scan(&id, &expires, &commercial, &anchorDay)
-	fresh := e == pgx.ErrNoRows
+	fresh := e == store.ErrNoRows
 	now := time.Now()
 	restartCycle := fresh || expires.Before(now)
 	if restartCycle {
@@ -278,7 +278,7 @@ func (s *Server) commerceGrantTx(r *http.Request, tx pgx.Tx, b commerceGrantRequ
 	var subscription string
 	var tokenSealed []byte
 	e = tx.QueryRow(r.Context(), "SELECT id FROM subscriptions WHERE tenant_id=$1 AND user_id=$2 AND device_id IS NULL AND independent_identity AND revoked_at IS NULL ORDER BY created_at LIMIT 1 FOR UPDATE", tenant, id).Scan(&subscription)
-	if e == pgx.ErrNoRows {
+	if e == store.ErrNoRows {
 		subscription = ID()
 		token := ID() + ID()
 		tokenSealed, e = live.Seal(s.MasterKey, []byte(token))

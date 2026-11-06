@@ -1,23 +1,23 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"context"
 	"encoding/json"
 	"net/http"
 	"vps-control/internal/live"
 
-	"github.com/jackc/pgx/v5"
-)
+	)
 
 // The caller holds the graph lock. The durable subject ID also attributes all
 // protocol-specific credentials back to the user for billing and access logs.
-func (s *Server) ensureSubscriptionIdentity(ctx context.Context, tx pgx.Tx, subscription, user, device string) ([]byte, bool, error) {
+func (s *Server) ensureSubscriptionIdentity(ctx context.Context, tx store.Tx, subscription, user, device string) ([]byte, bool, error) {
 	var sealed []byte
 	err := tx.QueryRow(ctx, `SELECT sealed FROM subscription_identities WHERE tenant_id=$1 AND subscription_id=$2 AND COALESCE(device_id,'')=$3`, tenant, subscription, device).Scan(&sealed)
 	if err == nil {
 		return sealed, false, nil
 	}
-	if err != pgx.ErrNoRows {
+	if err != store.ErrNoRows {
 		return nil, false, err
 	}
 	var count int

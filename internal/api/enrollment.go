@@ -1,13 +1,13 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"bytes"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
-	"github.com/jackc/pgx/v5"
-	"io"
+		"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -192,7 +192,7 @@ func (s *Server) enrollmentClaim(w http.ResponseWriter, r *http.Request) error {
 	var host string
 	// Same host lock order as ticket generation prevents claim/regeneration races.
 	e = tx.QueryRow(ctx, "SELECT host_id FROM agent_enrollments WHERE token_hash=$1 AND tenant_id=$2", Hash(b.Ticket), tenant).Scan(&host)
-	if e == pgx.ErrNoRows {
+	if e == store.ErrNoRows {
 		return problem{401, "invalid or expired enrollment ticket"}
 	}
 	if e != nil {
@@ -224,7 +224,7 @@ func (s *Server) enrollmentClaim(w http.ResponseWriter, r *http.Request) error {
 }
 func (s *Server) enrollmentStatus(w http.ResponseWriter, r *http.Request) error {
 	var raw json.RawMessage
-	e := s.DB.QueryRow(r.Context(), `SELECT json_build_object('state',CASE WHEN e.consumed_at IS NULL AND e.revoked_at IS NULL AND e.expires_at>now() THEN 'waiting' WHEN h.last_seen>now()-interval '90 seconds' AND (e.consumed_at IS NULL OR h.last_seen>=e.consumed_at) THEN 'connected' WHEN e.revoked_at IS NOT NULL THEN 'revoked' WHEN e.consumed_at IS NOT NULL THEN 'installed' WHEN e.expires_at<=now() THEN 'expired' ELSE 'waiting' END,'expires_at',e.expires_at,'last_seen',h.last_seen) FROM hosts h LEFT JOIN LATERAL (SELECT * FROM agent_enrollments WHERE tenant_id=h.tenant_id AND host_id=h.id ORDER BY created_at DESC LIMIT 1) e ON true WHERE h.tenant_id=$1 AND h.id=$2`, tenant, r.PathValue("id")).Scan(&raw)
+	e := s.DB.QueryRow(r.Context(), `SELECT json_build_object('state',CASE WHEN e.consumed_at IS NULL AND e.revoked_at IS NULL AND e.expires_at>now() THEN 'waiting' WHEN h.last_seen>now()-interval '90 seconds' AND (e.consumed_at IS NULL OR h.last_seen>=e.consumed_at) THEN 'connected' WHEN e.revoked_at IS NOT NULL THEN 'revoked' WHEN e.consumed_at IS NOT NULL THEN 'installed' WHEN e.expires_at<=now() THEN 'expired' ELSE 'waiting' END,'expires_at',e.expires_at,'last_seen',h.last_seen) FROM hosts h LEFT JOIN agent_enrollments e ON e.token_hash=(SELECT token_hash FROM agent_enrollments WHERE tenant_id=h.tenant_id AND host_id=h.id ORDER BY created_at DESC LIMIT 1) WHERE h.tenant_id=$1 AND h.id=$2`, tenant, r.PathValue("id")).Scan(&raw)
 	if e != nil {
 		return e
 	}

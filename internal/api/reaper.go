@@ -1,15 +1,12 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"context"
-	"github.com/jackc/pgx/v5"
-)
+	)
 
-func reap(ctx context.Context, tx pgx.Tx) error {
-	rows, e := tx.Query(ctx, `WITH expired AS (SELECT tenant_id,id FROM tasks WHERE tenant_id=$1 AND state='running' AND lease_until<=now() FOR UPDATE SKIP LOCKED LIMIT 200)
- UPDATE tasks t SET state=CASE WHEN attempts>=3 THEN 'failed' ELSE 'queued' END,
- result=CASE WHEN attempts>=3 THEN 'lease expired after 3 attempts' ELSE 'lease expired; queued for retry' END,
- lease_token=NULL,lease_until=NULL,updated_at=now() FROM expired x WHERE (t.tenant_id,t.id)=(x.tenant_id,x.id) RETURNING t.id,t.state`, tenant)
+func reap(ctx context.Context, tx store.Tx) error {
+	rows, e := tx.Query(ctx, `UPDATE tasks SET state=CASE WHEN attempts>=3 THEN 'failed' ELSE 'queued' END, result=CASE WHEN attempts>=3 THEN 'lease expired after 3 attempts' ELSE 'lease expired; queued for retry' END, lease_token=NULL,lease_until=NULL,updated_at=now() WHERE tenant_id=$1 AND state='running' AND lease_until<=now() AND id IN (SELECT id FROM tasks WHERE tenant_id=$1 AND state='running' AND lease_until<=now() LIMIT 200) RETURNING id,state`, tenant)
 	if e != nil {
 		return e
 	}
@@ -79,7 +76,7 @@ func (s *Server) Reap(ctx context.Context) error {
 	}
 	var clock string
 	e = tx.QueryRow(ctx, `INSERT INTO maintenance_clock VALUES($1,now()) ON CONFLICT(tenant_id) DO UPDATE SET last_run_at=excluded.last_run_at WHERE maintenance_clock.last_run_at<now()-interval '1 minute' RETURNING tenant_id`, tenant).Scan(&clock)
-	if e != nil && e != pgx.ErrNoRows {
+	if e != nil && e != store.ErrNoRows {
 		return e
 	}
 	if e == nil {

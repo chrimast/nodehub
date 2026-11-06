@@ -1,15 +1,15 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"encoding/json"
-	"github.com/jackc/pgx/v5"
 	"net/http"
 	"net/netip"
 	"slices"
 	"vps-control/internal/live"
 )
 
-func (s *Server) applyNetwork(r *http.Request, tx pgx.Tx, b liveInput, spec *live.Spec) error {
+func (s *Server) applyNetwork(r *http.Request, tx store.Tx, b liveInput, spec *live.Spec) error {
 	if b.Kind == "frpc" {
 		return nil
 	}

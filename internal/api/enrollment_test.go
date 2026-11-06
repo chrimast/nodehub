@@ -4,43 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"net/http/httptest"
-	"net/url"
+		"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 	"testing"
-	"vps-control/internal/store"
 )
 
 func TestEnrollmentIntegration(t *testing.T) {
-	rawURL := os.Getenv("TEST_DATABASE_URL")
-	if rawURL == "" {
-		t.Skip("TEST_DATABASE_URL required")
-	}
+	db := openTestDB(t)
 	ctx := context.Background()
-	pool, e := pgxpool.New(ctx, rawURL)
-	if e != nil {
-		t.Fatal(e)
-	}
-	defer pool.Close()
-	schema := "enroll_" + ID()
-	if _, e = pool.Exec(ctx, "CREATE SCHEMA "+schema); e != nil {
-		t.Fatal(e)
-	}
-	defer pool.Exec(ctx, "DROP SCHEMA "+schema+" CASCADE")
-	u, _ := url.Parse(rawURL)
-	q := u.Query()
-	q.Set("search_path", schema)
-	u.RawQuery = q.Encode()
-	db, e := store.Open(ctx, u.String())
-	if e != nil {
-		t.Fatal(e)
-	}
-	defer db.Close()
 	dir := t.TempDir()
 	file := filepath.Join(dir, "linux-amd64.zip")
 	os.WriteFile(file, []byte("test-package"), 0600)
@@ -133,7 +108,7 @@ func TestEnrollmentIntegration(t *testing.T) {
 		t.Fatal("reconnect command hidden by old heartbeat")
 	}
 	var currentHash string
-	if e = db.QueryRow(ctx, "SELECT agent_hash FROM hosts WHERE tenant_id=$1 AND id=$2", tenant, id).Scan(&currentHash); e != nil || currentHash != Hash(claimed["agent_token"].(string)) {
+	if e := db.QueryRow(ctx, "SELECT agent_hash FROM hosts WHERE tenant_id=$1 AND id=$2", tenant, id).Scan(&currentHash); e != nil || currentHash != Hash(claimed["agent_token"].(string)) {
 		t.Fatal("generating ticket prematurely revoked active Agent")
 	}
 	want("POST", path+"/revoke", nil, 200)
@@ -141,7 +116,7 @@ func TestEnrollmentIntegration(t *testing.T) {
 		t.Fatal("revoked ticket accepted")
 	}
 	fourth := issue()
-	if _, e = db.Exec(ctx, "UPDATE agent_enrollments SET expires_at=now()-interval '1 second' WHERE token_hash=$1", Hash(fourth)); e != nil {
+	if _, e := db.Exec(ctx, "UPDATE agent_enrollments SET expires_at=now()-interval '1 second' WHERE token_hash=$1", Hash(fourth)); e != nil {
 		t.Fatal(e)
 	}
 	if code, _ := call("POST", "agent/enroll", map[string]string{"ticket": fourth}, false); code != 401 {

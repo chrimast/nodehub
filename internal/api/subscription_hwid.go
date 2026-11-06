@@ -1,6 +1,7 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -9,8 +10,7 @@ import (
 	"unicode/utf8"
 	"vps-control/internal/live"
 
-	"github.com/jackc/pgx/v5"
-)
+	)
 
 // Compatibility contract documented by Remnawave/Happ. This is a client-reported
 // installation identifier, never proof of physical hardware or an IP fingerprint.
@@ -67,14 +67,14 @@ func (s *Server) subscriptionDevice(w http.ResponseWriter, r *http.Request, user
 	var id string
 	var enabled bool
 	err = tx.QueryRow(r.Context(), `SELECT id,enabled FROM user_devices WHERE tenant_id=$1 AND user_id=$2 AND hwid_hash=$3`, tenant, user, hash).Scan(&id, &enabled)
-	if err != nil && err != pgx.ErrNoRows {
+	if err != nil && err != store.ErrNoRows {
 		return "", err
 	}
 	if err == nil && !enabled {
 		w.Header().Set("X-Starhub-Device-Error", "device_disabled")
 		return "", problem{403, "此客户端设备已被停用，请联系管理员"}
 	}
-	if err == pgx.ErrNoRows {
+	if err == store.ErrNoRows {
 		var active, total, workspaceActive, workspaceTotal int
 		if err = tx.QueryRow(r.Context(), `SELECT count(*) FILTER(WHERE user_id=$2 AND enabled),count(*) FILTER(WHERE user_id=$2),count(*) FILTER(WHERE enabled),count(*) FROM user_devices WHERE tenant_id=$1`, tenant, user).Scan(&active, &total, &workspaceActive, &workspaceTotal); err != nil {
 			return "", err

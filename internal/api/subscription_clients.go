@@ -1,9 +1,9 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"encoding/json"
-	"github.com/jackc/pgx/v5"
-	"net"
+		"net"
 	"net/http"
 	"net/netip"
 	"strings"
@@ -70,13 +70,13 @@ func (s *Server) observeSubscription(w http.ResponseWriter, r *http.Request, use
 	var id string
 	var enabled bool
 	err = tx.QueryRow(r.Context(), `SELECT id,enabled FROM subscription_clients WHERE tenant_id=$1 AND user_id=$2 AND fingerprint=$3`, tenant, user, fingerprint).Scan(&id, &enabled)
-	if err != nil && err != pgx.ErrNoRows {
+	if err != nil && err != store.ErrNoRows {
 		return err
 	}
 	if err == nil && !enabled {
 		return problem{403, "此订阅客户端记录已停用，请联系管理员；该记录是兼容识别，不是物理硬件证明"}
 	}
-	if err == pgx.ErrNoRows {
+	if err == store.ErrNoRows {
 		// Unlimited users retain only the newest 30 enabled observations. These
 		// are IP-based observations, not reliable physical device identities.
 		// Never evict disabled records, or a blocked client could re-register.
@@ -207,7 +207,7 @@ func (s *Server) userSubscription(w http.ResponseWriter, r *http.Request) error 
 	e = tx.QueryRow(r.Context(), `SELECT id,sealed_token FROM subscriptions WHERE tenant_id=$1 AND user_id=$2 AND device_id IS NULL AND revoked_at IS NULL AND expires_at>now() AND sealed_token IS NOT NULL ORDER BY created_at LIMIT 1 FOR UPDATE`, tenant, user).Scan(&id, &sealed)
 	reused := e == nil
 	var token string
-	if e == pgx.ErrNoRows {
+	if e == store.ErrNoRows {
 		var n int
 		if e = tx.QueryRow(r.Context(), `SELECT count(*) FROM subscriptions WHERE tenant_id=$1`, tenant).Scan(&n); e != nil {
 			return e

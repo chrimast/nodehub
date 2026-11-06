@@ -1,7 +1,7 @@
 package api
 
 import (
-	"github.com/jackc/pgx/v5"
+	"vps-control/internal/store"
 	"net/http"
 	"vps-control/internal/buildinfo"
 )
@@ -9,7 +9,7 @@ import (
 func (s *Server) branding(w http.ResponseWriter, r *http.Request) error {
 	title := "星枢"
 	e := s.DB.QueryRow(r.Context(), `SELECT title FROM site_settings WHERE tenant_id=$1`, tenant).Scan(&title)
-	if e != nil && e != pgx.ErrNoRows {
+	if e != nil && e != store.ErrNoRows {
 		return e
 	}
 	unit, e := s.trafficDisplayUnit(r.Context())

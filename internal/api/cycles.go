@@ -1,8 +1,8 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"context"
-	"github.com/jackc/pgx/v5"
 	"time"
 )
 
@@ -30,7 +30,7 @@ func nextMonthlyResetDay(anchor, after time.Time, day int) time.Time {
 	}
 }
 
-func resetPeriods(ctx context.Context, tx pgx.Tx) error {
+func resetPeriods(ctx context.Context, tx store.Tx) error {
 	if e := resetHostPeriods(ctx, tx); e != nil {
 		return e
 	}
@@ -97,7 +97,7 @@ func resetPeriods(ctx context.Context, tx pgx.Tx) error {
 	return nil
 }
 
-func configureCycle(ctx context.Context, tx pgx.Tx, id string, anchor *time.Time, changed bool) error {
+func configureCycle(ctx context.Context, tx store.Tx, id string, anchor *time.Time, changed bool) error {
 	var strategy string
 	var day int
 	var current, now time.Time

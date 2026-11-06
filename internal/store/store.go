@@ -2,75 +2,53 @@ package store
 
 import (
 	"context"
-	"embed"
+	"database/sql"
+	_ "embed"
 	"fmt"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"os"
+	"path/filepath"
 	"strings"
-	"time"
+
+	_ "modernc.org/sqlite"
 )
 
-//go:embed migrations/*.sql
-var migrations embed.FS
+//go:embed schema.sqlite.sql
+var sqliteSchema string
 
-func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
-	config, e := pgxpool.ParseConfig(url)
-	if e != nil {
-		return nil, e
+func Open(ctx context.Context, raw string) (*DB, error) {
+	path, err := sqlitePath(raw)
+	if err != nil {
+		return nil, err
 	}
-	// Small VPS defaults, overridable with pgx URL pool_max_conns / pool_min_conns.
-	// ParseConfig already consumes pool parameters; preserve explicit values from the URL.
-	if !strings.Contains(url, "pool_max_conns=") {
-		config.MaxConns = 4
-	}
-	if !strings.Contains(url, "pool_min_conns=") {
-		config.MinConns = 0
-	}
-	config.MaxConnIdleTime = 2 * time.Minute
-	p, e := pgxpool.NewWithConfig(ctx, config)
-	if e != nil {
-		return nil, e
-	}
-	if e = p.Ping(ctx); e != nil {
-		p.Close()
-		return nil, e
-	}
-	if e = migrate(ctx, p); e != nil {
-		p.Close()
-		return nil, e
-	}
-	return p, nil
-}
-func migrate(ctx context.Context, p *pgxpool.Pool) error {
-	tx, e := p.Begin(ctx)
-	if e != nil {
-		return e
-	}
-	defer tx.Rollback(ctx)
-	if _, e = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(74012001)"); e != nil {
-		return e
-	}
-	if _, e = tx.Exec(ctx, "CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())"); e != nil {
-		return e
-	}
-	entries, e := migrations.ReadDir("migrations")
-	if e != nil {
-		return e
-	}
-	for _, entry := range entries {
-		var exists bool
-		if e = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)", entry.Name()).Scan(&exists); e != nil {
-			return e
+	if !strings.HasPrefix(path, "file:") {
+		dir := filepath.Dir(path)
+		if dir != "." && dir != "" {
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				return nil, err
+			}
 		}
-		if exists {
-			continue
-		}
-		b, _ := migrations.ReadFile("migrations/" + entry.Name())
-		if _, e = tx.Exec(ctx, string(b)); e != nil {
-			return fmt.Errorf("migration %s: %w", entry.Name(), e)
-		}
-		if _, e = tx.Exec(ctx, "INSERT INTO schema_migrations(version) VALUES($1)", entry.Name()); e != nil {
-			return e
-		}
+		path = "file:" + path + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(15000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
 	}
-	return tx.Commit(ctx)
+	sqlDB, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, err
+	}
+	sqlDB.SetMaxOpenConns(1)
+	if err := sqlDB.PingContext(ctx); err != nil {
+		sqlDB.Close()
+		return nil, err
+	}
+	if _, err := sqlDB.ExecContext(ctx, "PRAGMA foreign_keys=ON"); err != nil {
+		sqlDB.Close()
+		return nil, err
+	}
+	if _, err := sqlDB.ExecContext(ctx, sqliteSchema); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("sqlite schema: %w", err)
+	}
+	if _, err := sqlDB.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version) VALUES('sqlite-nodehub')`); err != nil {
+		sqlDB.Close()
+		return nil, err
+	}
+	return &DB{sql: sqlDB}, nil
 }

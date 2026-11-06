@@ -1,11 +1,11 @@
 package api
 
 import (
+	"vps-control/internal/store"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"github.com/jackc/pgx/v5"
 	"net/http"
 	"slices"
 	"strings"
@@ -33,7 +33,7 @@ func (s *Server) EnsureDefaultClientPolicy(ctx context.Context) error {
 	defer tx.Rollback(ctx)
 	var oldID, oldSource string
 	e = tx.QueryRow(ctx, `SELECT id,source FROM client_policies WHERE tenant_id=$1 AND user_id IS NULL AND client_id='all' AND name='Mihomo Max 默认模板' AND bindings='{}'::jsonb FOR UPDATE`, tenant).Scan(&oldID, &oldSource)
-	if e != nil && e != pgx.ErrNoRows {
+	if e != nil && e != store.ErrNoRows {
 		return e
 	}
 	if e == nil && fmt.Sprintf("%x", sha256.Sum256([]byte(oldSource))) == legacyDefaultSourceSHA {
@@ -46,7 +46,7 @@ func (s *Server) EnsureDefaultClientPolicy(ctx context.Context) error {
 	}
 	var marker string
 	e = tx.QueryRow(ctx, `INSERT INTO client_policy_bootstrap(tenant_id) VALUES($1) ON CONFLICT DO NOTHING RETURNING tenant_id`, tenant).Scan(&marker)
-	if e == pgx.ErrNoRows {
+	if e == store.ErrNoRows {
 		return tx.Commit(ctx)
 	}
 	if e != nil {
