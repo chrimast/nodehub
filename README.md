@@ -1,6 +1,6 @@
 # 星枢 · VPS 多机管理 0.25.5（nodehub / SQLite）
 
-本仓库 `nodehub` 分支是 fork 后的 **SQLite 版**：不部署 PostgreSQL。网页 `IP:18080`，登录令牌为 `ADMIN_TOKEN`。不要和官方一键 `/opt/starhub-control` 装在同一台抢端口。`MASTER_KEY` 部署后不能更换。
+本仓库 [chrimast/nodesub](https://github.com/chrimast/nodesub) 是 fork 后的 **SQLite 版**：不部署 PostgreSQL。网页 `IP:18080`，登录令牌为 `ADMIN_TOKEN`。不要和官方一键 `/opt/starhub-control` 装在同一台抢端口。`MASTER_KEY` 部署后不能更换。
 
 ## 1Panel Compose 部署
 
@@ -16,7 +16,7 @@ name: nodehub
 services:
   api:
     build:
-      context: https://github.com/chrimast/czy-code.git#nodehub
+      context: https://github.com/chrimast/nodesub.git
       dockerfile: Dockerfile
     image: nodehub-api:nodehub
     environment:
@@ -45,7 +45,7 @@ services:
     restart: unless-stopped
   web:
     build:
-      context: https://github.com/chrimast/czy-code.git#nodehub:web
+      context: https://github.com/chrimast/nodesub.git#:web
       dockerfile: Dockerfile
     image: nodehub-web:nodehub
     ports:
