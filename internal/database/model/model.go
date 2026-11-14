@@ -838,6 +838,15 @@ type Setting struct {
 	Value string `json:"value" form:"value"`
 }
 
+// NodeType identifies the kind of managed node. Panel is the legacy/default
+// node kind; Agent is persisted now so the agent runtime can be added later.
+type NodeType string
+
+const (
+	NodeTypePanel NodeType = "panel"
+	NodeTypeAgent NodeType = "agent"
+)
+
 // Node represents a remote 3x-ui panel registered with the central panel.
 // The central panel polls each node's existing /panel/api/server/status
 // endpoint over HTTP using the per-node ApiToken to populate the runtime
@@ -845,6 +854,7 @@ type Setting struct {
 type Node struct {
 	Id                  int      `json:"id" form:"id" gorm:"primaryKey;autoIncrement" example:"1"`
 	Name                string   `json:"name" form:"name" gorm:"uniqueIndex" validate:"required" example:"de-fra-1"`
+	NodeType            NodeType `json:"nodeType" form:"nodeType" gorm:"column:node_type;default:panel" validate:"omitempty,oneof=panel agent" example:"panel"`
 	Remark              string   `json:"remark" form:"remark"`
 	Scheme              string   `json:"scheme" form:"scheme" validate:"omitempty,oneof=http https" example:"https"`
 	Address             string   `json:"address" form:"address" validate:"required" example:"node1.example.com"`

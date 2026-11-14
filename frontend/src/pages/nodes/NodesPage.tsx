@@ -88,6 +88,7 @@ export default function NodesPage() {
     fetchInbounds,
     probe,
     updatePanels,
+    applyAgentConfig,
   } = useNodeMutations();
 
   const { data: latestVersion = '' } = useQuery({
@@ -188,7 +189,12 @@ export default function NodesPage() {
       if (msg?.success && msg.obj) {
         if (msg.obj.status === 'online') {
           // Even if xray is in error/stop on the node we still reached its panel API.
-          messageApi.success(t('pages.nodes.connectionOk', { ms: msg.obj.latencyMs }));
+          messageApi.success(
+            t(
+              node.nodeType === 'agent' ? 'pages.nodes.agentConnected' : 'pages.nodes.connectionOk',
+              { ms: msg.obj.latencyMs },
+            ),
+          );
         } else {
           messageApi.error(msg.obj.error || t('pages.nodes.toasts.probeFailed'));
         }
@@ -230,8 +236,23 @@ export default function NodesPage() {
     [updatePanels, messageApi, t],
   );
 
+  const onApplyAgentConfig = useCallback(
+    async (node: NodeRecord): Promise<'applied' | 'disabled' | 'unknown' | 'failed'> => {
+      if (!node.enable) return 'disabled';
+      try {
+        const msg = await applyAgentConfig(node.id);
+        if (!msg?.success) return 'failed';
+        return msg.obj?.status ?? 'unknown';
+      } catch {
+        return 'unknown';
+      }
+    },
+    [applyAgentConfig],
+  );
+
   const onUpdateNode = useCallback(
     (node: NodeRecord) => {
+      if (node.nodeType === 'agent') return;
       devRef.current = false;
       modal.confirm({
         title: t('pages.nodes.updateConfirmTitle', { count: 1 }),
@@ -252,7 +273,10 @@ export default function NodesPage() {
 
   const onUpdateSelected = useCallback(() => {
     const eligible = nodes
-      .filter((n) => selectedIds.includes(n.id) && n.enable && n.status === 'online')
+      .filter(
+        (n) =>
+          n.nodeType !== 'agent' && selectedIds.includes(n.id) && n.enable && n.status === 'online',
+      )
       .map((n) => n.id);
     if (eligible.length === 0) {
       messageApi.warning(t('pages.nodes.toasts.updateNoneEligible'));
@@ -373,6 +397,7 @@ export default function NodesPage() {
                       onToggleEnable={onToggleEnable}
                       onUpdateNode={onUpdateNode}
                       onUpdateSelected={onUpdateSelected}
+                      onApplyAgentConfig={onApplyAgentConfig}
                     />
                   </Col>
                 </Row>

@@ -951,6 +951,22 @@ export const sections: readonly Section[] = [
         responseSchemaArray: true,
       },
       {
+        method: 'POST',
+        path: '/panel/api/server/scanRealityNeighbors',
+        summary:
+          'Scan this node’s own public IPv4 /24 for feasible REALITY targets. Available to node-sync tokens.',
+        params: [
+          {
+            name: 'limit',
+            in: 'body (form)',
+            type: 'number',
+            optional: true,
+            desc: 'Maximum number of results.',
+          },
+        ],
+        response: '{"success":true,"obj":{"results":[],"scanned":253,"nodeId":0}}',
+      },
+      {
         method: 'GET',
         path: '/panel/api/server/clientIps',
         summary:
@@ -1852,6 +1868,28 @@ export const sections: readonly Section[] = [
         path: '/panel/api/nodes/probe/:id',
         summary: 'Probe an existing node, updating its cached health state.',
         params: [{ name: 'id', in: 'path', type: 'number', desc: 'Node ID.' }],
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/nodes/applyAgentConfig/:id',
+        summary:
+          'Apply the current scoped inbound configuration to an enabled agent, or disable the agent when its scoped inbound set is empty. The result is explicit: applied, disabled, unknown, or failed. Agent credentials and configuration are never returned.',
+        params: [{ name: 'id', in: 'path', type: 'number', desc: 'Agent node ID.' }],
+        responseObjectSchema: {
+          type: 'object',
+          properties: {
+            status: {
+              type: 'string',
+              enum: ['applied', 'disabled', 'unknown', 'failed'],
+            },
+            reason: {
+              type: 'string',
+              description:
+                'Safe failure classification; present only when the operation is not confirmed.',
+            },
+          },
+          required: ['status'],
+        },
       },
       {
         method: 'POST',

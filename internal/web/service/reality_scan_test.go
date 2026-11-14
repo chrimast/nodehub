@@ -1,10 +1,71 @@
 package service
 
 import (
+	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"net"
 	"testing"
+	"time"
 )
+
+func TestRealityProbeBudgetIncludesDNS(t *testing.T) {
+	old := net.DefaultResolver
+	net.DefaultResolver = &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}}
+	t.Cleanup(func() { net.DefaultResolver = old })
+	start := time.Now()
+	result := (&ServerService{}).probeRealityAddrWithContext(context.Background(), "stalled.example", 443, "stalled.example", 100*time.Millisecond, false)
+	elapsed := time.Since(start)
+	t.Logf("probe elapsed: %s, reason: %s", elapsed, result.Reason)
+	if elapsed > time.Second {
+		t.Fatalf("probe exceeded its 100ms budget: %s", elapsed)
+	}
+}
+
+func TestFirstUsableNamePrefersCertificateSAN(t *testing.T) {
+	leaf := &x509.Certificate{Subject: pkix.Name{CommonName: "not-in-san.example"}, DNSNames: []string{"valid.example"}}
+	if got := firstUsableName(leaf); got != "valid.example" {
+		t.Fatalf("got %q, want valid SAN", got)
+	}
+}
+
+func TestRealityProbeDeadlineStopsTLSHandshake(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		buf := make([]byte, 4096)
+		for {
+			if _, err := conn.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+	addr := listener.Addr().(*net.TCPAddr)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	result := (&ServerService{}).probeRealityAddrWithContext(ctx, "127.0.0.1", addr.Port, "localhost", 5*time.Second, true)
+	elapsed := time.Since(start)
+	<-done
+	t.Logf("stalled TLS elapsed: %s, reason: %s", elapsed, result.Reason)
+	if elapsed > time.Second || result.Feasible {
+		t.Fatalf("stalled TLS did not stop at deadline: %s", elapsed)
+	}
+}
 
 func TestTLSVersionName(t *testing.T) {
 	cases := map[uint16]string{

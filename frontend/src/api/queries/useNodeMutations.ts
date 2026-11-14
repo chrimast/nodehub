@@ -22,6 +22,11 @@ export interface RemoteInboundOption {
   port?: number;
 }
 
+export interface AgentApplyResult {
+  status: 'applied' | 'disabled' | 'unknown' | 'failed';
+  reason?: string;
+}
+
 export function useNodeMutations() {
   const queryClient = useQueryClient();
   const invalidate = () => {
@@ -83,6 +88,14 @@ export function useNodeMutations() {
     },
   });
 
+  const applyAgentConfigMut = useMutation({
+    mutationFn: (id: number) =>
+      HttpUtil.post<AgentApplyResult>(`/panel/api/nodes/applyAgentConfig/${id}`),
+    onSuccess: (msg) => {
+      if (msg?.success) invalidate();
+    },
+  });
+
   return {
     create: (payload: Partial<NodeRecord>) => createMut.mutateAsync(payload),
     update: (id: number, payload: Partial<NodeRecord>) => updateMut.mutateAsync({ id, payload }),
@@ -91,6 +104,7 @@ export function useNodeMutations() {
     probe: (id: number) => probeMut.mutateAsync(id),
     updatePanels: (ids: number[], dev: boolean): Promise<Msg<NodeUpdateResult[]>> =>
       updatePanelsMut.mutateAsync({ ids, dev }),
+    applyAgentConfig: (id: number) => applyAgentConfigMut.mutateAsync(id),
     testConnection: async (payload: Partial<NodeRecord>): Promise<Msg<ProbeResult>> => {
       const raw = await HttpUtil.post('/panel/api/nodes/test', payload);
       return parseMsg(raw, ProbeResultSchema, 'nodes/test');

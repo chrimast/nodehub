@@ -350,6 +350,7 @@ export default function InboundFormModal({
     clearMldsa65,
     scanRealityTarget,
     scanRealityCandidates,
+    scanRealityNeighbors,
     applyRealityScanResult,
     randomizeShortIds,
     randomizeSpiderX,
@@ -1105,6 +1106,7 @@ export default function InboundFormModal({
           scanResult={scanResult}
           scanRealityTarget={scanRealityTarget}
           scanRealityCandidates={scanRealityCandidates}
+          scanRealityNeighbors={scanRealityNeighbors}
           applyRealityScanResult={applyRealityScanResult}
           randomizeShortIds={randomizeShortIds}
           randomizeSpiderX={randomizeSpiderX}

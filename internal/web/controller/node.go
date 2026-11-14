@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/mhsanaei/3x-ui/v3/internal/database/model"
 	"github.com/mhsanaei/3x-ui/v3/internal/logger"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/middleware"
 	"github.com/mhsanaei/3x-ui/v3/internal/web/service"
@@ -40,11 +41,62 @@ func (a *NodeController) initRouter(g *gin.RouterGroup) {
 	g.POST("/certFingerprint", a.certFingerprint)
 	g.POST("/inbounds", a.inbounds)
 	g.POST("/probe/:id", a.probe)
+	g.POST("/applyAgentConfig/:id", a.applyAgentConfig)
 	g.POST("/updatePanel", a.updatePanel)
 	g.GET("/history/:id/:metric/:bucket", a.history)
 	g.POST("/mtls/ca", a.mtlsCa)
 	g.POST("/mtls/trustCA", a.setMtlsTrustCA)
 	g.POST("/mtls/reloadClient", a.reloadMtlsClient)
+}
+
+var agentApplyTimeout = 30 * time.Second
+
+// applyAgentConfig reports an explicit acknowledgement as applied or disabled.
+// A timeout is unknown because the request may have reached the agent even
+// though its response did not return.
+func (a *NodeController) applyAgentConfig(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		a.writeAgentApplyResult(c, service.AgentApplyResult{Status: "failed"}, "invalid_node_id")
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), agentApplyTimeout)
+	defer cancel()
+	result, applyErr := a.nodeService.ApplyAgentConfig(ctx, id)
+	if applyErr == nil && result.Applied {
+		a.writeAgentApplyResult(c, result, "")
+		return
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(applyErr, context.DeadlineExceeded) {
+		result.Status = "unknown"
+		a.writeAgentApplyResult(c, result, "timeout")
+		return
+	}
+	if result.Status == "unknown" {
+		a.writeAgentApplyResult(c, result, "agent_unavailable")
+		return
+	}
+	result.Status = "failed"
+	reason := "apply_failed"
+	if applyErr != nil {
+		reason = "agent_unavailable"
+	}
+	a.writeAgentApplyResult(c, result, reason)
+}
+
+func (a *NodeController) writeAgentApplyResult(c *gin.Context, result service.AgentApplyResult, reason string) {
+	obj := gin.H{"status": result.Status}
+	if reason != "" {
+		obj["reason"] = reason
+	}
+	if result.Status == "applied" || result.Status == "disabled" {
+		jsonObj(c, obj, nil)
+		return
+	}
+	if reason == "" {
+		reason = "agent_apply_failed"
+	}
+	jsonObj(c, obj, errors.New(reason))
 }
 
 // reloadMtlsClient validates the credential currently stored by the master and
@@ -235,7 +287,15 @@ func (a *NodeController) setEnable(c *gin.Context) {
 		jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.obtain"), err)
 		return
 	}
-	if err := a.nodeService.SetEnable(id, body.Enable); err != nil {
+	result, err := a.nodeService.SetEnableWithResult(id, body.Enable)
+	if err != nil || (n.NodeType == model.NodeTypeAgent && result.Status != "disabled" && result.Status != "applied") {
+		if n.NodeType == model.NodeTypeAgent {
+			if result.Status == "" {
+				result.Status = "failed"
+			}
+			a.writeAgentApplyResult(c, result, "remote_disable_failed")
+			return
+		}
 		jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.update"), err)
 		return
 	}
@@ -243,6 +303,10 @@ func (a *NodeController) setEnable(c *gin.Context) {
 		if err := a.xrayService.RestartXray(false); err != nil {
 			logger.Warning("apply node enable change failed:", err)
 		}
+	}
+	if n.NodeType == model.NodeTypeAgent {
+		a.writeAgentApplyResult(c, result, "")
+		return
 	}
 	jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.update"), nil)
 }

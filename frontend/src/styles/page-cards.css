@@ -132,3 +132,10 @@
 .hosts-page .ant-card .ant-card-actions {
   background: transparent;
 }
+
+/* Nodehub surfaces use a soft border and generous corner radius. */
+:is(.index-page, .clients-page, .inbounds-page, .xray-page, .settings-page, .nodes-page, .groups-page, .hosts-page, .api-docs-page, .sponsors-page) .ant-card {
+  border-radius: 20px;
+  border-color: var(--ant-color-border-secondary);
+  box-shadow: 0 1px 2px rgba(22, 26, 36, 0.05), 0 12px 32px -20px rgba(22, 26, 36, 0.16);
+}

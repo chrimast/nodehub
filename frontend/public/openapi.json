@@ -26,6 +26,30 @@
       }
     },
     "schemas": {
+      "AgentCapabilities": {
+        "description": "AgentCapabilities reports advertised operations, not actual Xray state.",
+        "properties": {
+          "config_apply": {
+            "type": "boolean"
+          },
+          "config_save": {
+            "type": "boolean"
+          },
+          "runtime_health": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "config_apply",
+          "config_save",
+          "runtime_health",
+          "version"
+        ],
+        "type": "object"
+      },
       "AllSetting": {
         "properties": {
           "datepicker": {
@@ -3727,6 +3751,14 @@
             "format": "int64",
             "type": "integer"
           },
+          "nodeType": {
+            "enum": [
+              "panel",
+              "agent"
+            ],
+            "example": "panel",
+            "type": "string"
+          },
           "onlineCount": {
             "example": 3,
             "type": "integer"
@@ -3833,6 +3865,7 @@
           "name",
           "netDown",
           "netUp",
+          "nodeType",
           "onlineCount",
           "outboundTag",
           "panelVersion",
@@ -3891,6 +3924,13 @@
           "name": {
             "type": "string"
           },
+          "nodeType": {
+            "enum": [
+              "panel",
+              "agent"
+            ],
+            "type": "string"
+          },
           "outboundTag": {
             "type": "string"
           },
@@ -3931,6 +3971,7 @@
           "inboundSyncMode",
           "inboundTags",
           "name",
+          "nodeType",
           "outboundTag",
           "pinnedCertSha256",
           "port",
@@ -4052,6 +4093,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "nodeType": {
+            "example": "panel",
+            "type": "string"
+          },
           "onlineCount": {
             "example": 5,
             "type": "integer"
@@ -4148,6 +4193,7 @@
           "name",
           "netDown",
           "netUp",
+          "nodeType",
           "onlineCount",
           "outboundTag",
           "panelVersion",
@@ -4289,6 +4335,14 @@
       },
       "ProbeResultUI": {
         "properties": {
+          "agentCapabilities": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AgentCapabilities"
+              }
+            ],
+            "nullable": true
+          },
           "cpuPct": {
             "example": 12.5,
             "type": "number"
@@ -8253,6 +8307,60 @@
         }
       }
     },
+    "/panel/api/server/scanRealityNeighbors": {
+      "post": {
+        "tags": [
+          "Server"
+        ],
+        "summary": "Scan this node’s own public IPv4 /24 for feasible REALITY targets. Available to node-sync tokens.",
+        "operationId": "post_panel_api_server_scanRealityNeighbors",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of results."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                },
+                "example": {
+                  "success": true,
+                  "obj": {
+                    "results": [],
+                    "scanned": 253,
+                    "nodeId": 0
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/panel/api/server/clientIps": {
       "get": {
         "tags": [
@@ -11449,6 +11557,7 @@
                       "name": "edge-1",
                       "netDown": 1048576,
                       "netUp": 2097152,
+                      "nodeType": "panel",
                       "onlineCount": 5,
                       "outboundTag": "direct",
                       "panelVersion": "v3.x.x",
@@ -11653,6 +11762,7 @@
                     "name": "edge-1",
                     "netDown": 1048576,
                     "netUp": 2097152,
+                    "nodeType": "panel",
                     "onlineCount": 5,
                     "outboundTag": "direct",
                     "panelVersion": "v3.x.x",
@@ -11806,6 +11916,7 @@
                     "name": "edge-1",
                     "netDown": 1048576,
                     "netUp": 2097152,
+                    "nodeType": "panel",
                     "onlineCount": 5,
                     "outboundTag": "direct",
                     "panelVersion": "v3.x.x",
@@ -12037,6 +12148,7 @@
                 "example": {
                   "success": true,
                   "obj": {
+                    "agentCapabilities": null,
                     "cpuPct": 12.5,
                     "error": "",
                     "latencyMs": 42,
@@ -12200,6 +12312,67 @@
                       "type": "string"
                     },
                     "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/nodes/applyAgentConfig/{id}": {
+      "post": {
+        "tags": [
+          "Nodes"
+        ],
+        "summary": "Apply the current scoped inbound configuration to an enabled agent, or disable the agent when its scoped inbound set is empty. The result is explicit: applied, disabled, unknown, or failed. Agent credentials and configuration are never returned.",
+        "operationId": "post_panel_api_nodes_applyAgentConfig_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Agent node ID.",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "applied",
+                            "disabled",
+                            "unknown",
+                            "failed"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "description": "Safe failure classification; present only when the operation is not confirmed."
+                        }
+                      },
+                      "required": [
+                        "status"
+                      ]
+                    }
                   }
                 }
               }
@@ -17036,6 +17209,7 @@
                   "name": "edge-1",
                   "netDown": 1048576,
                   "netUp": 2097152,
+                  "nodeType": "panel",
                   "onlineCount": 5,
                   "outboundTag": "direct",
                   "panelVersion": "v3.x.x",

@@ -39,6 +39,7 @@ interface NodeFormModalProps {
 function defaultValues(): NodeFormValues {
   return {
     id: 0,
+    nodeType: 'panel',
     name: '',
     remark: '',
     scheme: 'https',
@@ -78,6 +79,7 @@ export default function NodeFormModal({
   const [inboundOptions, setInboundOptions] = useState<RemoteInboundOption[]>([]);
   const [testResult, setTestResult] = useState<ProbeResult | null>(null);
   const scheme = useWatch({ control: methods.control, name: 'scheme' }) ?? 'https';
+  const nodeType = useWatch({ control: methods.control, name: 'nodeType' }) ?? 'panel';
   const tlsVerifyMode = useWatch({ control: methods.control, name: 'tlsVerifyMode' }) ?? 'verify';
   const inboundSyncMode = useWatch({ control: methods.control, name: 'inboundSyncMode' }) ?? 'all';
   const { data: outboundGroups } = useOutboundTagGroups({ excludeBlackhole: true });
@@ -117,6 +119,7 @@ export default function NodeFormModal({
             ...base,
             ...(node as unknown as Partial<NodeFormValues>),
             id: node.id,
+            nodeType: node.nodeType || 'panel',
             scheme: (node.scheme as 'http' | 'https') || base.scheme,
             inboundSyncMode: (node.inboundSyncMode as 'all' | 'selected') || base.inboundSyncMode,
             inboundTags: node.inboundTags ?? [],
@@ -141,6 +144,7 @@ export default function NodeFormModal({
     const token = values.apiToken.trim();
     const payload: Partial<NodeRecord> = {
       id: values.id || 0,
+      nodeType: values.nodeType,
       name: values.name.trim(),
       remark: values.remark?.trim() || '',
       scheme: values.scheme,
@@ -151,10 +155,12 @@ export default function NodeFormModal({
       allowPrivateAddress: values.allowPrivateAddress,
       tlsVerifyMode: values.tlsVerifyMode,
       pinnedCertSha256: values.tlsVerifyMode === 'pin' ? values.pinnedCertSha256.trim() : '',
-      inboundSyncMode: values.inboundSyncMode,
-      inboundTags: values.inboundSyncMode === 'selected' ? values.inboundTags : [],
       outboundTag: values.outboundTag || '',
     };
+    if (values.nodeType === 'panel') {
+      payload.inboundSyncMode = values.inboundSyncMode;
+      payload.inboundTags = values.inboundSyncMode === 'selected' ? values.inboundTags : [];
+    }
     if (token) payload.apiToken = token;
     return payload;
   }
@@ -256,6 +262,33 @@ export default function NodeFormModal({
       >
         <FormProvider {...methods}>
           <Form layout="vertical">
+            <FormField
+              label={t('pages.nodes.nodeType')}
+              name="nodeType"
+              onAfterChange={(value) => {
+                if (value === 'agent') {
+                  if (methods.getValues('tlsVerifyMode') === 'mtls')
+                    methods.setValue('tlsVerifyMode', 'verify');
+                }
+                setTestResult(null);
+              }}
+            >
+              <Select
+                disabled={mode === 'edit'}
+                options={[
+                  { value: 'panel', label: t('pages.nodes.panelNode') },
+                  { value: 'agent', label: t('pages.nodes.agentNode') },
+                ]}
+              />
+            </FormField>
+            {nodeType === 'agent' && (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 16 }}
+                title={t('pages.nodes.agentWarning')}
+              />
+            )}
             <Row gutter={16}>
               <Col xs={24} md={12}>
                 <FormField
@@ -280,6 +313,7 @@ export default function NodeFormModal({
                   name="scheme"
                   onAfterChange={(value) => {
                     if (value === 'http') methods.setValue('tlsVerifyMode', 'skip');
+                    else methods.setValue('tlsVerifyMode', 'verify');
                   }}
                 >
                   <Select
@@ -343,12 +377,26 @@ export default function NodeFormModal({
                   { value: 'verify', label: t('pages.nodes.tlsVerify') },
                   { value: 'pin', label: t('pages.nodes.tlsPin') },
                   { value: 'skip', label: t('pages.nodes.tlsSkip') },
-                  { value: 'mtls', label: t('pages.nodes.tlsMtls') },
+                  ...(nodeType === 'panel'
+                    ? [{ value: 'mtls', label: t('pages.nodes.tlsMtls') }]
+                    : []),
                 ]}
               />
             </FormField>
 
-            {tlsVerifyMode === 'skip' && (
+            {scheme === 'http' && (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 16 }}
+                title={t('pages.nodes.httpWarning', {
+                  defaultValue:
+                    'HTTP sends credentials and configuration unencrypted; anyone on the network may read or modify them. Prefer HTTPS.',
+                })}
+              />
+            )}
+
+            {scheme === 'https' && tlsVerifyMode === 'skip' && (
               <Alert
                 type="warning"
                 showIcon
@@ -385,14 +433,20 @@ export default function NodeFormModal({
               label={t('pages.nodes.apiToken')}
               name="apiToken"
               rules={{ validate: rhfZodValidate(NodeFormSchema.shape.apiToken) }}
-              tooltip={t('pages.nodes.apiTokenHint')}
+              tooltip={t(
+                nodeType === 'agent' ? 'pages.nodes.agentTokenHint' : 'pages.nodes.apiTokenHint',
+              )}
               extra={editingWithToken ? t('pages.nodes.apiTokenKeepHint') : undefined}
             >
               <Input.Password
                 placeholder={
                   editingWithToken
                     ? t('pages.nodes.apiTokenKeepHint')
-                    : t('pages.nodes.apiTokenPlaceholder')
+                    : t(
+                        nodeType === 'agent'
+                          ? 'pages.nodes.agentTokenHint'
+                          : 'pages.nodes.apiTokenPlaceholder',
+                      )
                 }
               />
             </FormField>
@@ -411,52 +465,55 @@ export default function NodeFormModal({
               />
             </FormField>
 
-            <FormField
-              label={t('pages.nodes.inboundSyncMode')}
-              name="inboundSyncMode"
-              tooltip={t('pages.nodes.inboundSyncModeHint')}
-            >
-              <Select
-                options={[
-                  { value: 'all', label: t('pages.nodes.allInbounds') },
-                  { value: 'selected', label: t('pages.nodes.selectedInbounds') },
-                ]}
-              />
-            </FormField>
+            {nodeType === 'panel' && (
+              <>
+                <FormField
+                  label={t('pages.nodes.inboundSyncMode')}
+                  name="inboundSyncMode"
+                  tooltip={t('pages.nodes.inboundSyncModeHint')}
+                >
+                  <Select
+                    options={[
+                      { value: 'all', label: t('pages.nodes.allInbounds') },
+                      { value: 'selected', label: t('pages.nodes.selectedInbounds') },
+                    ]}
+                  />
+                </FormField>
 
-            {inboundSyncMode === 'selected' && (
-              <FormField
-                label={t('pages.nodes.inboundTags')}
-                name="inboundTags"
-                tooltip={t('pages.nodes.inboundTagsHint')}
-              >
-                <Select
-                  mode="multiple"
-                  tagRender={selectTagRender}
-                  allowClear
-                  loading={fetchingInbounds}
-                  placeholder={t('pages.nodes.inboundTagsPlaceholder')}
-                  popupRender={(menu) => (
-                    <>
-                      <Button
-                        type="text"
-                        block
-                        loading={fetchingInbounds}
-                        onClick={onFetchInbounds}
-                      >
-                        {t('pages.nodes.loadInbounds')}
-                      </Button>
-                      {menu}
-                    </>
-                  )}
-                  options={inboundOptions.map((inbound) => ({
-                    value: inbound.tag,
-                    label: `${inbound.remark || inbound.tag}${inbound.protocol ? ` (${inbound.protocol}:${inbound.port || 0})` : ''}`,
-                  }))}
-                />
-              </FormField>
+                {inboundSyncMode === 'selected' && (
+                  <FormField
+                    label={t('pages.nodes.inboundTags')}
+                    name="inboundTags"
+                    tooltip={t('pages.nodes.inboundTagsHint')}
+                  >
+                    <Select
+                      mode="multiple"
+                      tagRender={selectTagRender}
+                      allowClear
+                      loading={fetchingInbounds}
+                      placeholder={t('pages.nodes.inboundTagsPlaceholder')}
+                      popupRender={(menu) => (
+                        <>
+                          <Button
+                            type="text"
+                            block
+                            loading={fetchingInbounds}
+                            onClick={onFetchInbounds}
+                          >
+                            {t('pages.nodes.loadInbounds')}
+                          </Button>
+                          {menu}
+                        </>
+                      )}
+                      options={inboundOptions.map((inbound) => ({
+                        value: inbound.tag,
+                        label: `${inbound.remark || inbound.tag}${inbound.protocol ? ` (${inbound.protocol}:${inbound.port || 0})` : ''}`,
+                      }))}
+                    />
+                  </FormField>
+                )}
+              </>
             )}
-
             <div className="test-row">
               <Button type="default" loading={testing} onClick={onTest}>
                 {t('pages.nodes.testConnection')}
@@ -467,7 +524,12 @@ export default function NodeFormModal({
                     <Alert
                       type="success"
                       showIcon
-                      title={t('pages.nodes.connectionOk', { ms: testResult.latencyMs })}
+                      title={t(
+                        nodeType === 'agent'
+                          ? 'pages.nodes.agentConnected'
+                          : 'pages.nodes.connectionOk',
+                        { ms: testResult.latencyMs },
+                      )}
                       description={
                         testResult.xrayVersion ? `Xray ${testResult.xrayVersion}` : undefined
                       }

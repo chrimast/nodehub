@@ -1,0 +1,31 @@
+# Isolated local trial for the current checkout.
+# Run with: docker compose -f docker-compose.trial.yml up --build
+# First start uses admin/admin. Keep the trial endpoint local; change credentials before exposure.
+name: nodehub-xui-trial
+
+services:
+  panel:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      # Trial panel endpoint; intentionally different from the project's default 2053.
+      - "127.0.0.1:22053:2053"
+    volumes:
+      # Dedicated named volume: persistent SQLite data, separate from production mounts.
+      - nodehub_xui_trial_data:/etc/x-ui
+    environment:
+      XUI_DB_TYPE: sqlite
+      XUI_DB_FOLDER: /etc/x-ui
+      XUI_PORT: "2053"
+      XUI_INIT_WEB_BASE_PATH: /
+      # Fail2ban needs host firewall capabilities and is not part of this trial.
+      XUI_ENABLE_FAIL2BAN: "false"
+      XRAY_VMESS_AEAD_FORCED: "false"
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
+volumes:
+  nodehub_xui_trial_data:
+    name: nodehub_xui_trial_data

@@ -122,7 +122,23 @@ func migrateClientKeepAliveRangeColumn() error {
 	return migrator.AddColumn(&model.ClientRecord{}, "KeepAliveRange")
 }
 
+func migrateNodeTypeColumn() error {
+	migrator := db.Migrator()
+	if !migrator.HasTable(&model.Node{}) {
+		return nil
+	}
+	if !migrator.HasColumn(&model.Node{}, "node_type") {
+		if err := migrator.AddColumn(&model.Node{}, "NodeType"); err != nil {
+			return err
+		}
+	}
+	return db.Model(&model.Node{}).Where("node_type IS NULL OR TRIM(node_type) = ''").Update("node_type", model.NodeTypePanel).Error
+}
+
 func initModels() error {
+	if err := migrateNodeTypeColumn(); err != nil {
+		return err
+	}
 	if err := migrateClientKeepAliveRangeColumn(); err != nil {
 		return err
 	}
@@ -1488,14 +1504,14 @@ func isIgnorableDuplicateColumnErr(gdb *gorm.DB, err error, mdl any) bool {
 	return false
 }
 
-// EnsureFirstUser creates the panel's first user with random credentials and returns
-// them, or returns "" when one exists; only the starting server calls it, so it can print them.
+// EnsureFirstUser creates the default panel user when no user exists and returns
+// the credentials, or returns empty strings when a user already exists.
 func EnsureFirstUser() (username, password string, err error) {
 	empty, err := isTableEmpty("users")
 	if err != nil || !empty {
 		return "", "", err
 	}
-	username, password = random.Seq(10), random.Seq(16)
+	username, password = "admin", "admin"
 	hashedPassword, err := crypto.HashPasswordAsBcrypt(password)
 	if err != nil {
 		return "", "", err

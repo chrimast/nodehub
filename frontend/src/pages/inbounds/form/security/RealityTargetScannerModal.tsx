@@ -12,6 +12,7 @@ interface RealityTargetScannerModalProps {
   open: boolean;
   onClose: () => void;
   scanRealityCandidates: (targets?: string) => Promise<RealityScanResult[]>;
+  scanRealityNeighbors: () => Promise<RealityScanResult[]>;
   onPick: (result: RealityScanResult) => void;
   mldsa65Enabled?: boolean;
 }
@@ -20,6 +21,7 @@ export default function RealityTargetScannerModal({
   open,
   onClose,
   scanRealityCandidates,
+  scanRealityNeighbors,
   onPick,
   mldsa65Enabled = false,
 }: RealityTargetScannerModalProps) {
@@ -27,14 +29,20 @@ export default function RealityTargetScannerModal({
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<RealityScanResult[]>([]);
-  const scanRef = useRef(scanRealityCandidates);
+  const scanCandidatesRef = useRef(scanRealityCandidates);
+  const scanNeighborsRef = useRef(scanRealityNeighbors);
   useEffect(() => {
-    scanRef.current = scanRealityCandidates;
+    scanCandidatesRef.current = scanRealityCandidates;
+    scanNeighborsRef.current = scanRealityNeighbors;
   });
 
   const applyScan = useCallback(async (targets?: string) => {
     try {
-      setResults(await scanRef.current(targets));
+      setResults(
+        targets === undefined
+          ? await scanNeighborsRef.current()
+          : await scanCandidatesRef.current(targets),
+      );
     } finally {
       setLoading(false);
     }
@@ -181,6 +189,7 @@ export default function RealityTargetScannerModal({
 
   return (
     <Modal
+      className="reality-target-scanner-modal"
       open={open}
       onCancel={onClose}
       footer={[
@@ -192,7 +201,7 @@ export default function RealityTargetScannerModal({
         </Button>,
       ]}
       title={t('pages.inbounds.form.scanModalTitle')}
-      width={1080}
+      width="min(1080px, calc(100vw - 24px))"
     >
       <Space orientation="vertical" size="small" style={{ width: '100%' }}>
         <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>

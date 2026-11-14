@@ -7,7 +7,7 @@
 .groups-page,
 .api-docs-page,
 .sponsors-page {
-  --bg-page: #e6e8ec;
+  --bg-page: #fbf1e8;
   --bg-card: #ffffff;
   min-height: 100vh;
   background: var(--bg-page);
@@ -22,8 +22,8 @@
 .groups-page.is-dark,
 .api-docs-page.is-dark,
 .sponsors-page.is-dark {
-  --bg-page: #1a1b1f;
-  --bg-card: #23252b;
+  --bg-page: #0d1118;
+  --bg-card: #161d27;
 }
 
 .index-page.is-dark.is-ultra,
@@ -193,15 +193,15 @@ body.dark .ant-dropdown-menu-item-divider {
 /* Hosts page shares the standard panel page shell (background, transparent
    layout, content padding, summary-card padding). */
 .hosts-page {
-  --bg-page: #e6e8ec;
+  --bg-page: #fbf1e8;
   --bg-card: #ffffff;
   min-height: 100vh;
   background: var(--bg-page);
 }
 
 .hosts-page.is-dark {
-  --bg-page: #1a1b1f;
-  --bg-card: #23252b;
+  --bg-page: #0d1118;
+  --bg-card: #161d27;
 }
 
 .hosts-page.is-dark.is-ultra {
@@ -227,5 +227,16 @@ body.dark .ant-dropdown-menu-item-divider {
   .hosts-page .content-area,
   .hosts-page .summary-card {
     padding: 8px;
+  }
+}
+
+@media (max-width: 768px) {
+  :is(.clients-page, .inbounds-page, .nodes-page, .groups-page, .hosts-page, .settings-page, .xray-page, .api-docs-page, .sponsors-page) .content-area {
+    padding: 68px 12px 16px;
+    min-width: 0;
+  }
+
+  :is(.index-page, .clients-page, .inbounds-page, .nodes-page, .groups-page, .hosts-page, .settings-page, .xray-page) .ant-layout-content {
+    min-width: 0;
   }
 }

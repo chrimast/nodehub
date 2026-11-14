@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Badge, Button, Card, Dropdown, Modal, Space, Switch, Table, Tag, Tooltip } from 'antd';
 import type { BadgeProps } from 'antd';
@@ -7,6 +7,7 @@ import {
   ApartmentOutlined,
   ClusterOutlined,
   CloudDownloadOutlined,
+  CloudUploadOutlined,
   DeleteOutlined,
   EditOutlined,
   ExclamationCircleOutlined,
@@ -42,10 +43,11 @@ interface NodeListProps {
   onToggleEnable: (node: NodeRecord, next: boolean) => void;
   onUpdateNode: (node: NodeRecord) => void;
   onUpdateSelected: () => void;
+  onApplyAgentConfig?: (node: NodeRecord) => Promise<'applied' | 'disabled' | 'unknown' | 'failed'>;
 }
 
 function isUpdateEligible(n: NodeRecord): boolean {
-  return !!n.enable && n.status === 'online';
+  return n.nodeType !== 'agent' && !!n.enable && n.status === 'online';
 }
 
 interface NodeRow extends NodeRecord {
@@ -68,6 +70,7 @@ interface HealthProps {
   status?: string;
   xrayState?: string;
   xrayError?: string;
+  nodeType?: string;
 }
 
 // Purple: the node's panel API is reachable (status=online) but its Xray core
@@ -95,9 +98,9 @@ function statusIssue(record: Pick<NodeRecord, 'status' | 'xrayState' | 'xrayErro
   return { tip, iconColor };
 }
 
-function StatusDot({ status, xrayState }: HealthProps) {
+function StatusDot({ status, xrayState, nodeType }: HealthProps) {
   if (status === 'online') {
-    return hasXrayProblem(status, xrayState) ? (
+    return nodeType !== 'agent' && hasXrayProblem(status, xrayState) ? (
       <span className="xray-error-dot" />
     ) : (
       <span className="online-dot" />
@@ -106,9 +109,10 @@ function StatusDot({ status, xrayState }: HealthProps) {
   return <Badge status={badgeStatus(status)} />;
 }
 
-function StatusLabel({ status, xrayState }: HealthProps) {
+function StatusLabel({ status, xrayState, nodeType }: HealthProps) {
   const { t } = useTranslation();
   if (status === 'online') {
+    if (nodeType === 'agent') return <span>{t('pages.nodes.agentConnected')}</span>;
     const xs = (xrayState || '').toLowerCase().trim();
     if (xs === 'error' || xs === 'stop') {
       const detail =
@@ -187,6 +191,7 @@ export default function NodeList({
   onToggleEnable,
   onUpdateNode,
   onUpdateSelected,
+  onApplyAgentConfig = async () => 'failed',
 }: NodeListProps) {
   const { t } = useTranslation();
   const relativeTime = useRelativeTime();
@@ -194,6 +199,11 @@ export default function NodeList({
   const [showAddress, setShowAddress] = useState(false);
   const [statsNode, setStatsNode] = useState<NodeRow | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
+  const [applyStatus, setApplyStatus] = useState<
+    Record<number, 'applied' | 'disabled' | 'unknown' | 'failed'>
+  >({});
+  const [applyingId, setApplyingId] = useState<number | null>(null);
+  const [modal, modalContextHolder] = Modal.useModal();
 
   // Map a direct node's GUID to its display name so a transitive sub-node can show
   // which parent it is reached through (#4983); the master walks one level only.
@@ -248,6 +258,29 @@ export default function NodeList({
     });
   }
 
+  const confirmApplyAgentConfig = useCallback(
+    (node: NodeRecord) => {
+      modal.confirm({
+        title: t('pages.nodes.agentApplyConfirmTitle', { name: node.name }),
+        content: t('pages.nodes.agentApplyConfirmContent'),
+        okText: t('pages.nodes.agentApplyConfig'),
+        cancelText: t('cancel'),
+        onOk: async () => {
+          setApplyingId(node.id);
+          try {
+            const status = await onApplyAgentConfig(node);
+            setApplyStatus((current) => ({ ...current, [node.id]: status }));
+          } catch {
+            setApplyStatus((current) => ({ ...current, [node.id]: 'failed' }));
+          } finally {
+            setApplyingId(null);
+          }
+        },
+      });
+    },
+    [modal, t, onApplyAgentConfig],
+  );
+
   const columns = useMemo<ColumnsType<NodeRow>>(
     () => [
       {
@@ -286,6 +319,20 @@ export default function NodeList({
                     icon={<CloudDownloadOutlined aria-hidden />}
                     aria-label={t('pages.nodes.updatePanel')}
                     onClick={() => onUpdateNode(record)}
+                  />
+                </Tooltip>
+              )}
+              {record.nodeType === 'agent' && record.enable && (
+                <Tooltip title={t('pages.nodes.agentApplyConfig')}>
+                  <Button
+                    type="text"
+                    size="small"
+                    style={{ fontSize: 16 }}
+                    icon={<CloudUploadOutlined aria-hidden />}
+                    aria-label={t('pages.nodes.agentApplyConfig')}
+                    loading={applyingId === record.id}
+                    disabled={applyingId !== null}
+                    onClick={() => confirmApplyAgentConfig(record)}
                   />
                 </Tooltip>
               )}
@@ -344,6 +391,9 @@ export default function NodeList({
                 <ApartmentOutlined aria-hidden style={{ marginInlineEnd: 6, opacity: 0.6 }} />
               )}
               {record.name}
+              {record.nodeType === 'agent' && (
+                <Tag style={{ marginInlineStart: 6 }}>{t('pages.nodes.agentNode')}</Tag>
+              )}
             </span>
             {record.remark && <span className="remark">{record.remark}</span>}
           </div>
@@ -394,11 +444,29 @@ export default function NodeList({
         dataIndex: 'status',
         align: 'center',
         render: (_value, record) => {
-          const { tip, iconColor } = statusIssue(record);
+          const { tip, iconColor } = statusIssue(
+            record.nodeType === 'agent'
+              ? { ...record, xrayState: undefined, xrayError: undefined }
+              : record,
+          );
           return (
             <Space size={4}>
-              <StatusDot status={record.status} xrayState={record.xrayState} />
-              <StatusLabel status={record.status} xrayState={record.xrayState} />
+              <StatusDot
+                status={record.status}
+                xrayState={record.xrayState}
+                nodeType={record.nodeType}
+              />
+              <StatusLabel
+                status={record.status}
+                xrayState={record.xrayState}
+                nodeType={record.nodeType}
+              />
+              {record.nodeType === 'agent' && !record.enable && (
+                <Tag>{t('pages.nodes.agentApplyStatus.panelDisabled')}</Tag>
+              )}
+              {record.nodeType === 'agent' && applyStatus[record.id] && (
+                <Tag>{t(`pages.nodes.agentApplyStatus.${applyStatus[record.id]}`)}</Tag>
+              )}
               {tip && (
                 <Tooltip title={tip}>
                   <ExclamationCircleOutlined style={{ color: iconColor }} aria-label={tip} />
@@ -414,20 +482,27 @@ export default function NodeList({
         align: 'center',
         width: 90,
         render: (_value, record) =>
-          formatPct(record.cpuPct, !record.unavailableMetrics?.includes('cpu')),
+          formatPct(
+            record.cpuPct,
+            record.nodeType !== 'agent' && !record.unavailableMetrics?.includes('cpu'),
+          ),
       },
       {
         title: t('pages.nodes.mem'),
         dataIndex: 'memPct',
         align: 'center',
         width: 90,
-        render: (_value, record) => formatPct(record.memPct),
+        render: (_value, record) =>
+          formatPct(
+            record.memPct,
+            record.nodeType !== 'agent' && !record.unavailableMetrics?.includes('mem'),
+          ),
       },
       {
         title: t('pages.nodes.xrayVersion'),
         dataIndex: 'xrayVersion',
         align: 'center',
-        render: (_value, record) => record.xrayVersion || '-',
+        render: (_value, record) => (record.nodeType === 'agent' ? '—' : record.xrayVersion || '-'),
       },
       {
         title: t('pages.nodes.panelVersion') || 'Panel version',
@@ -439,7 +514,7 @@ export default function NodeList({
             isPanelUpdateAvailable(latestVersion, record.panelVersion || '');
           return (
             <Space size={4}>
-              <span>{record.panelVersion || '-'}</span>
+              <span>{record.nodeType === 'agent' ? '—' : record.panelVersion || '-'}</span>
               {canUpdate && (
                 <Tooltip title={`${t('pages.nodes.updateAvailable')}: ${latestVersion}`}>
                   <Tag
@@ -463,59 +538,65 @@ export default function NodeList({
         dataIndex: 'uptimeSecs',
         align: 'center',
         render: (_value, record) =>
-          formatUptime(record.uptimeSecs, !record.unavailableMetrics?.includes('uptime')),
+          formatUptime(
+            record.uptimeSecs,
+            record.nodeType !== 'agent' && !record.unavailableMetrics?.includes('uptime'),
+          ),
       },
       {
         title: t('clients'),
         align: 'center',
         width: 180,
-        render: (_value, record) => (
-          <Space size={2}>
-            <Tag className="client-count-tag" style={{ margin: 0, padding: '0 2px' }}>
-              <TeamOutlined aria-hidden /> {record.clientCount || 0}
-            </Tag>
-            {record.activeCount ? (
-              <Tooltip title={t('subscription.active')}>
-                <Tag
-                  color="green"
-                  className="client-count-tag"
-                  style={{ margin: 0, padding: '0 2px' }}
-                >
-                  {record.activeCount}
-                </Tag>
-              </Tooltip>
-            ) : null}
-            {record.disabledCount ? (
-              <Tooltip title={t('disabled')}>
-                <Tag className="client-count-tag" style={{ margin: 0, padding: '0 2px' }}>
-                  {record.disabledCount}
-                </Tag>
-              </Tooltip>
-            ) : null}
-            {record.depletedCount ? (
-              <Tooltip title={t('depleted')}>
-                <Tag
-                  color="red"
-                  className="client-count-tag"
-                  style={{ margin: 0, padding: '0 2px' }}
-                >
-                  {record.depletedCount}
-                </Tag>
-              </Tooltip>
-            ) : null}
-            {record.onlineCount ? (
-              <Tooltip title={t('online')}>
-                <Tag
-                  color="blue"
-                  className="client-count-tag"
-                  style={{ margin: 0, padding: '0 2px' }}
-                >
-                  {record.onlineCount}
-                </Tag>
-              </Tooltip>
-            ) : null}
-          </Space>
-        ),
+        render: (_value, record) =>
+          record.nodeType === 'agent' ? (
+            '—'
+          ) : (
+            <Space size={2}>
+              <Tag className="client-count-tag" style={{ margin: 0, padding: '0 2px' }}>
+                <TeamOutlined aria-hidden /> {record.clientCount || 0}
+              </Tag>
+              {record.activeCount ? (
+                <Tooltip title={t('subscription.active')}>
+                  <Tag
+                    color="green"
+                    className="client-count-tag"
+                    style={{ margin: 0, padding: '0 2px' }}
+                  >
+                    {record.activeCount}
+                  </Tag>
+                </Tooltip>
+              ) : null}
+              {record.disabledCount ? (
+                <Tooltip title={t('disabled')}>
+                  <Tag className="client-count-tag" style={{ margin: 0, padding: '0 2px' }}>
+                    {record.disabledCount}
+                  </Tag>
+                </Tooltip>
+              ) : null}
+              {record.depletedCount ? (
+                <Tooltip title={t('depleted')}>
+                  <Tag
+                    color="red"
+                    className="client-count-tag"
+                    style={{ margin: 0, padding: '0 2px' }}
+                  >
+                    {record.depletedCount}
+                  </Tag>
+                </Tooltip>
+              ) : null}
+              {record.onlineCount ? (
+                <Tooltip title={t('online')}>
+                  <Tag
+                    color="blue"
+                    className="client-count-tag"
+                    style={{ margin: 0, padding: '0 2px' }}
+                  >
+                    {record.onlineCount}
+                  </Tag>
+                </Tooltip>
+              ) : null}
+            </Space>
+          ),
       },
       {
         title: t('pages.nodes.latency'),
@@ -543,6 +624,9 @@ export default function NodeList({
       onEdit,
       onDelete,
       onUpdateNode,
+      applyingId,
+      applyStatus,
+      confirmApplyAgentConfig,
       nameByGuid,
     ],
   );
@@ -581,7 +665,7 @@ export default function NodeList({
         }}
         expandable={{
           expandedRowRender: (record) => <NodeHistoryPanel node={record} />,
-          rowExpandable: (record) => !record.transitive,
+          rowExpandable: (record) => !record.transitive && record.nodeType !== 'agent',
         }}
       />
     ),
@@ -590,6 +674,7 @@ export default function NodeList({
 
   return (
     <Card size="small" hoverable>
+      {modalContextHolder}
       <div className="toolbar">
         <Button type="primary" icon={<PlusOutlined aria-hidden />} onClick={onAdd}>
           {t('pages.nodes.addNode')}
@@ -597,9 +682,15 @@ export default function NodeList({
         <Button icon={<SafetyCertificateOutlined aria-hidden />} onClick={onMtls}>
           {t('pages.nodes.mtls.title')}
         </Button>
-        {selectedIds.length > 0 && (
+        {selectedIds.some((id) =>
+          nodes.some((node) => node.id === id && isUpdateEligible(node)),
+        ) && (
           <Button icon={<CloudDownloadOutlined aria-hidden />} onClick={onUpdateSelected}>
-            {t('pages.nodes.updateSelected', { count: selectedIds.length })}
+            {t('pages.nodes.updateSelected', {
+              count: selectedIds.filter((id) =>
+                nodes.some((node) => node.id === id && isUpdateEligible(node)),
+              ).length,
+            })}
           </Button>
         )}
       </div>
@@ -622,8 +713,19 @@ export default function NodeList({
                   >
                     <div className="card-head">
                       <ApartmentOutlined aria-hidden style={{ opacity: 0.6 }} />
-                      <StatusDot status={record.status} xrayState={record.xrayState} />
+                      <StatusDot
+                        status={record.status}
+                        xrayState={record.xrayState}
+                        nodeType={record.nodeType}
+                      />
                       <span className="node-name">{record.name}</span>
+                      {record.nodeType === 'agent' && <Tag>{t('pages.nodes.agentNode')}</Tag>}
+                      {record.nodeType === 'agent' && !record.enable && (
+                        <Tag>{t('pages.nodes.agentApplyStatus.panelDisabled')}</Tag>
+                      )}
+                      {record.nodeType === 'agent' && applyStatus[record.id] && (
+                        <Tag>{t(`pages.nodes.agentApplyStatus.${applyStatus[record.id]}`)}</Tag>
+                      )}
                       <div className="card-actions">
                         <Tag icon={<ApartmentOutlined aria-hidden />} style={{ margin: 0 }}>
                           {t('pages.nodes.subNode')}
@@ -637,20 +739,36 @@ export default function NodeList({
                     <div
                       className="card-head"
                       onClick={(e) => {
-                        if (!(e.target as HTMLElement).closest('.card-actions'))
+                        if (
+                          record.nodeType !== 'agent' &&
+                          !(e.target as HTMLElement).closest('.card-actions')
+                        )
                           toggleExpanded(record.id);
                       }}
                     >
-                      <RightOutlined
-                        className={`card-expand${expandedIds.has(record.id) ? ' is-expanded' : ''}`}
-                        role="button"
-                        tabIndex={0}
-                        aria-expanded={expandedIds.has(record.id)}
-                        aria-label={record.name}
-                        onKeyDown={activateOnKey(() => toggleExpanded(record.id))}
+                      {record.nodeType !== 'agent' && (
+                        <RightOutlined
+                          className={`card-expand${expandedIds.has(record.id) ? ' is-expanded' : ''}`}
+                          role="button"
+                          tabIndex={0}
+                          aria-expanded={expandedIds.has(record.id)}
+                          aria-label={record.name}
+                          onKeyDown={activateOnKey(() => toggleExpanded(record.id))}
+                        />
+                      )}
+                      <StatusDot
+                        status={record.status}
+                        xrayState={record.xrayState}
+                        nodeType={record.nodeType}
                       />
-                      <StatusDot status={record.status} xrayState={record.xrayState} />
                       <span className="node-name">{record.name}</span>
+                      {record.nodeType === 'agent' && <Tag>{t('pages.nodes.agentNode')}</Tag>}
+                      {record.nodeType === 'agent' && !record.enable && (
+                        <Tag>{t('pages.nodes.agentApplyStatus.panelDisabled')}</Tag>
+                      )}
+                      {record.nodeType === 'agent' && applyStatus[record.id] && (
+                        <Tag>{t(`pages.nodes.agentApplyStatus.${applyStatus[record.id]}`)}</Tag>
+                      )}
                       <div className="card-actions">
                         <Tooltip title={t('info')}>
                           <InfoCircleOutlined
@@ -693,6 +811,21 @@ export default function NodeList({
                                         </>
                                       ),
                                       onClick: () => onUpdateNode(record),
+                                    },
+                                  ]
+                                : []),
+                              ...(record.nodeType === 'agent' && record.enable
+                                ? [
+                                    {
+                                      key: 'apply-agent-config',
+                                      label: (
+                                        <>
+                                          <CloudUploadOutlined aria-hidden />{' '}
+                                          {t('pages.nodes.agentApplyConfig')}
+                                        </>
+                                      ),
+                                      disabled: applyingId !== null,
+                                      onClick: () => confirmApplyAgentConfig(record),
                                     },
                                   ]
                                 : []),
@@ -790,10 +923,22 @@ export default function NodeList({
                 </div>
                 <div className="stat-row">
                   <span className="stat-label">{t('pages.nodes.status')}</span>
-                  <StatusDot status={statsNode.status} xrayState={statsNode.xrayState} />
-                  <StatusLabel status={statsNode.status} xrayState={statsNode.xrayState} />
+                  <StatusDot
+                    status={statsNode.status}
+                    xrayState={statsNode.xrayState}
+                    nodeType={statsNode.nodeType}
+                  />
+                  <StatusLabel
+                    status={statsNode.status}
+                    xrayState={statsNode.xrayState}
+                    nodeType={statsNode.nodeType}
+                  />
                   {(() => {
-                    const { tip, iconColor } = statusIssue(statsNode);
+                    const { tip, iconColor } = statusIssue(
+                      statsNode.nodeType === 'agent'
+                        ? { ...statsNode, xrayState: undefined, xrayError: undefined }
+                        : statsNode,
+                    );
                     return tip ? (
                       <Tooltip title={tip}>
                         <ExclamationCircleOutlined style={{ color: iconColor }} aria-label={tip} />
@@ -804,29 +949,40 @@ export default function NodeList({
                 <div className="stat-row">
                   <span className="stat-label">{t('pages.nodes.cpu')}</span>
                   <Tag>
-                    {formatPct(statsNode.cpuPct, !statsNode.unavailableMetrics?.includes('cpu'))}
+                    {formatPct(
+                      statsNode.cpuPct,
+                      statsNode.nodeType !== 'agent' &&
+                        !statsNode.unavailableMetrics?.includes('cpu'),
+                    )}
                   </Tag>
                 </div>
                 <div className="stat-row">
                   <span className="stat-label">{t('pages.nodes.mem')}</span>
-                  <Tag>{formatPct(statsNode.memPct)}</Tag>
+                  <Tag>
+                    {formatPct(
+                      statsNode.memPct,
+                      statsNode.nodeType !== 'agent' &&
+                        !statsNode.unavailableMetrics?.includes('mem'),
+                    )}
+                  </Tag>
                 </div>
                 <div className="stat-row">
                   <span className="stat-label">{t('pages.nodes.xrayVersion')}</span>
-                  <Tag>{statsNode.xrayVersion || '-'}</Tag>
+                  <Tag>{statsNode.nodeType === 'agent' ? '—' : statsNode.xrayVersion || '-'}</Tag>
                 </div>
                 <div className="stat-row">
                   <span className="stat-label">
                     {t('pages.nodes.panelVersion') || 'Panel version'}
                   </span>
-                  <Tag>{statsNode.panelVersion || '-'}</Tag>
+                  <Tag>{statsNode.nodeType === 'agent' ? '—' : statsNode.panelVersion || '-'}</Tag>
                 </div>
                 <div className="stat-row">
                   <span className="stat-label">{t('pages.nodes.uptime')}</span>
                   <Tag>
                     {formatUptime(
                       statsNode.uptimeSecs,
-                      !statsNode.unavailableMetrics?.includes('uptime'),
+                      statsNode.nodeType !== 'agent' &&
+                        !statsNode.unavailableMetrics?.includes('uptime'),
                     )}
                   </Tag>
                 </div>
@@ -838,32 +994,34 @@ export default function NodeList({
                       : '-'}
                   </Tag>
                 </div>
-                <div className="stat-row">
-                  <span className="stat-label">{t('clients')}</span>
-                  <Tag>
-                    <TeamOutlined aria-hidden /> {statsNode.clientCount || 0}
-                  </Tag>
-                  {statsNode.activeCount ? (
-                    <Tag color="green">
-                      {statsNode.activeCount} {t('subscription.active')}
-                    </Tag>
-                  ) : null}
-                  {statsNode.disabledCount ? (
+                {statsNode.nodeType !== 'agent' && (
+                  <div className="stat-row">
+                    <span className="stat-label">{t('clients')}</span>
                     <Tag>
-                      {statsNode.disabledCount} {t('disabled')}
+                      <TeamOutlined aria-hidden /> {statsNode.clientCount || 0}
                     </Tag>
-                  ) : null}
-                  {statsNode.depletedCount ? (
-                    <Tag color="red">
-                      {statsNode.depletedCount} {t('depleted')}
-                    </Tag>
-                  ) : null}
-                  {statsNode.onlineCount ? (
-                    <Tag color="blue">
-                      {statsNode.onlineCount} {t('online')}
-                    </Tag>
-                  ) : null}
-                </div>
+                    {statsNode.activeCount ? (
+                      <Tag color="green">
+                        {statsNode.activeCount} {t('subscription.active')}
+                      </Tag>
+                    ) : null}
+                    {statsNode.disabledCount ? (
+                      <Tag>
+                        {statsNode.disabledCount} {t('disabled')}
+                      </Tag>
+                    ) : null}
+                    {statsNode.depletedCount ? (
+                      <Tag color="red">
+                        {statsNode.depletedCount} {t('depleted')}
+                      </Tag>
+                    ) : null}
+                    {statsNode.onlineCount ? (
+                      <Tag color="blue">
+                        {statsNode.onlineCount} {t('online')}
+                      </Tag>
+                    ) : null}
+                  </div>
+                )}
                 <div className="stat-row">
                   <span className="stat-label">{t('pages.nodes.lastHeartbeat')}</span>
                   <Tag>{relativeTime(statsNode.lastHeartbeat)}</Tag>

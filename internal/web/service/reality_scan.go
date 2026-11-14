@@ -128,10 +128,6 @@ func filterUsableSANs(dnsNames []string) []string {
 }
 
 func firstUsableName(leaf *x509.Certificate) string {
-	cn := strings.TrimSpace(leaf.Subject.CommonName)
-	if cn != "" && !strings.HasPrefix(cn, "*.") {
-		return cn
-	}
 	for _, n := range leaf.DNSNames {
 		n = strings.TrimSpace(n)
 		if n != "" && !strings.HasPrefix(n, "*.") {
@@ -191,6 +187,14 @@ func enumerateCIDR(cidr string, max int) ([]string, error) {
 }
 
 func (s *ServerService) probeRealityAddr(dialHost string, port int, sni string, timeout time.Duration, xver int, allowPrivate bool) *RealityScanResult {
+	ctx, cancel := context.WithTimeout(netsafe.ContextWithAllowPrivate(context.Background(), allowPrivate), timeout)
+	defer cancel()
+	return s.probeRealityAddrContext(ctx, dialHost, port, sni, timeout, xver, allowPrivate)
+}
+
+func (s *ServerService) probeRealityAddrContext(ctx context.Context, dialHost string, port int, sni string, timeout time.Duration, xver int, allowPrivate bool) *RealityScanResult {
+	ctx, cancel := context.WithTimeout(netsafe.ContextWithAllowPrivate(ctx, allowPrivate), timeout)
+	defer cancel()
 	addr := net.JoinHostPort(dialHost, strconv.Itoa(port))
 	res := &RealityScanResult{Port: port}
 	if net.ParseIP(dialHost) != nil {
@@ -203,9 +207,6 @@ func (s *ServerService) probeRealityAddr(dialHost string, port int, sni string, 
 	if sni != "" {
 		res.Host = sni
 	}
-
-	ctx, cancel := context.WithTimeout(netsafe.ContextWithAllowPrivate(context.Background(), allowPrivate), timeout)
-	defer cancel()
 
 	start := time.Now()
 	conn, err := netsafe.SSRFGuardedDialContext(ctx, "tcp", addr)
@@ -358,6 +359,10 @@ func (s *ServerService) realityScanCandidateTokens() []string {
 }
 
 func (s *ServerService) ScanRealityTargets(targetsCSV string) ([]*RealityScanResult, error) {
+	if isLocalRealityScanMarker(strings.TrimSpace(targetsCSV)) {
+		results, _, err := s.ScanRealityNeighborsLocal(context.Background(), 20)
+		return results, err
+	}
 	tokens := parseRealityScanCandidateCSV(targetsCSV)
 	if len(tokens) == 0 {
 		tokens = s.realityScanCandidateTokens()

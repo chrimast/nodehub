@@ -66,6 +66,9 @@ func newAPIAuthTestEngine(t *testing.T) (*gin.Engine, *APIController) {
 	api.POST("/server/updatePanel", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"reached": true})
 	})
+	api.POST("/nodes/applyAgentConfig/:id", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"reached": true})
+	})
 	api.POST("/clients/:email/detach", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"reached": true})
 	})
@@ -76,6 +79,39 @@ func newAPIAuthTestEngine(t *testing.T) (*gin.Engine, *APIController) {
 		c.JSON(http.StatusOK, gin.H{"reached": true})
 	})
 	return engine, a
+}
+
+func TestAgentConfigApplyRequiresNodeAdminScope(t *testing.T) {
+	engine, _ := newAPIAuthTestEngine(t)
+
+	for _, tc := range []struct {
+		name     string
+		scope    string
+		wantCode int
+	}{
+		{name: "node sync", scope: model.ApiScopeNodeSync, wantCode: http.StatusForbidden},
+		{name: "monitor", scope: model.ApiScopeMonitor, wantCode: http.StatusForbidden},
+		{name: "node admin", scope: model.ApiScopeNodeAdmin, wantCode: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plaintext := "agent-config-" + tc.name + "-token"
+			if err := database.GetDB().Create(&model.ApiToken{
+				Name:    tc.name,
+				Token:   crypto.HashTokenSHA256(plaintext),
+				Enabled: true,
+				Scope:   tc.scope,
+			}).Error; err != nil {
+				t.Fatalf("seed token: %v", err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/panel/api/nodes/applyAgentConfig/1", nil)
+			req.Header.Set("Authorization", "Bearer "+plaintext)
+			w := httptest.NewRecorder()
+			engine.ServeHTTP(w, req)
+			if w.Code != tc.wantCode {
+				t.Fatalf("status = %d body=%s, want %d", w.Code, w.Body.String(), tc.wantCode)
+			}
+		})
+	}
 }
 
 // TestCheckAPIAuth_BearerSuccess characterizes the bearer-token path: a valid

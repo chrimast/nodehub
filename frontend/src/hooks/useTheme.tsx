@@ -35,10 +35,10 @@ const initialUltra = readBool(STORAGE_ULTRA, false);
 applyDom(initialDark, initialUltra);
 
 const DARK_TOKENS = {
-  colorBgBase: '#1a1b1f',
-  colorBgLayout: '#1a1b1f',
-  colorBgContainer: '#23252b',
-  colorBgElevated: '#2d2f37',
+  colorBgBase: '#0d1118',
+  colorBgLayout: '#0d1118',
+  colorBgContainer: '#161d27',
+  colorBgElevated: '#263142',
 };
 const ULTRA_DARK_TOKENS = {
   colorBgBase: '#000',
@@ -47,12 +47,12 @@ const ULTRA_DARK_TOKENS = {
   colorBgElevated: '#1a1a1e',
 };
 const DARK_LAYOUT_TOKENS = {
-  bodyBg: '#1a1b1f',
-  headerBg: '#15161a',
+  bodyBg: '#0d1118',
+  headerBg: '#161d27',
   headerColor: '#ffffff',
-  footerBg: '#1a1b1f',
-  siderBg: '#15161a',
-  triggerBg: '#23252b',
+  footerBg: '#0d1118',
+  siderBg: '#161d27',
+  triggerBg: '#263142',
   triggerColor: '#ffffff',
 };
 const ULTRA_DARK_LAYOUT_TOKENS = {
@@ -65,9 +65,9 @@ const ULTRA_DARK_LAYOUT_TOKENS = {
   triggerColor: '#ffffff',
 };
 const DARK_MENU_TOKENS = {
-  darkItemBg: '#15161a',
-  darkSubMenuItemBg: '#1a1b1f',
-  darkPopupBg: '#23252b',
+  darkItemBg: '#161d27',
+  darkSubMenuItemBg: '#161d27',
+  darkPopupBg: '#263142',
 };
 const ULTRA_DARK_MENU_TOKENS = {
   darkItemBg: '#050507',
@@ -93,9 +93,9 @@ const LIGHT_CONTRAST_TOKENS = {
   colorSuccessText: '#237804',
 };
 const LIGHT_BUTTON_TOKENS = {
-  colorPrimary: '#0958d9',
-  colorPrimaryHover: '#2468e5',
-  colorPrimaryActive: '#073ea8',
+  colorPrimary: '#b24c0c',
+  colorPrimaryHover: '#db6317',
+  colorPrimaryActive: '#8f3c0a',
 };
 
 // hashed:false drops the `:where(.css-<hash>)` wrapper antd puts around every
@@ -117,7 +117,14 @@ export function buildAntdThemeConfig(isDark: boolean, isUltra: boolean): ThemeCo
     return {
       ...SHARED_STYLE_CONFIG,
       algorithm: antdTheme.defaultAlgorithm,
-      token: LIGHT_CONTRAST_TOKENS,
+      token: {
+        ...LIGHT_CONTRAST_TOKENS,
+        colorPrimary: '#b24c0c',
+        colorBgLayout: '#fbf1e8',
+        colorTextBase: '#161a24',
+        borderRadius: 12,
+        fontFamily: 'Onest, system-ui, -apple-system, Segoe UI, sans-serif',
+      },
       components: {
         Statistic: STATISTIC_TOKENS,
         Button: LIGHT_BUTTON_TOKENS,
@@ -127,7 +134,12 @@ export function buildAntdThemeConfig(isDark: boolean, isUltra: boolean): ThemeCo
   return {
     ...SHARED_STYLE_CONFIG,
     algorithm: antdTheme.darkAlgorithm,
-    token: isUltra ? ULTRA_DARK_TOKENS : DARK_TOKENS,
+    token: {
+      ...(isUltra ? ULTRA_DARK_TOKENS : DARK_TOKENS),
+      colorPrimary: '#f7964f',
+      borderRadius: 12,
+      fontFamily: 'Onest, system-ui, -apple-system, Segoe UI, sans-serif',
+    },
     components: {
       Layout: isUltra ? ULTRA_DARK_LAYOUT_TOKENS : DARK_LAYOUT_TOKENS,
       Menu: isUltra ? ULTRA_DARK_MENU_TOKENS : DARK_MENU_TOKENS,

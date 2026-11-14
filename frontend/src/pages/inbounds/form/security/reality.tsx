@@ -37,6 +37,7 @@ interface RealityFormProps {
   scanResult: RealityScanResult | null;
   scanRealityTarget: (allowPrivate?: boolean) => void;
   scanRealityCandidates: (targets?: string) => Promise<RealityScanResult[]>;
+  scanRealityNeighbors: () => Promise<RealityScanResult[]>;
   applyRealityScanResult: (result: RealityScanResult, replaceServerNames?: boolean) => void;
   randomizeShortIds: () => void;
   randomizeSpiderX: () => void;
@@ -52,6 +53,7 @@ export default function RealityForm({
   scanResult,
   scanRealityTarget,
   scanRealityCandidates,
+  scanRealityNeighbors,
   applyRealityScanResult,
   randomizeShortIds,
   randomizeSpiderX,
@@ -122,7 +124,7 @@ export default function RealityForm({
         label={t('pages.inbounds.form.target')}
         tooltip={t('pages.inbounds.form.realityTargetHint')}
       >
-        <Space.Compact block style={{ display: 'flex' }}>
+        <Space.Compact block className="reality-target-controls" style={{ display: 'flex' }}>
           <FormField
             name={['streamSettings', 'realitySettings', 'target']}
             noStyle
@@ -391,6 +393,7 @@ export default function RealityForm({
         open={scannerOpen}
         onClose={() => setScannerOpen(false)}
         scanRealityCandidates={scanRealityCandidates}
+        scanRealityNeighbors={scanRealityNeighbors}
         onPick={(r) => applyRealityScanResult(r, true)}
         mldsa65Enabled={mldsa65Enabled}
       />

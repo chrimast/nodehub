@@ -68,7 +68,7 @@ func (j *NodeHeartbeatJob) Run() {
 	var probesMu sync.Mutex
 	var probes []nodeProbe
 	for _, n := range nodes {
-		if !n.Enable {
+		if !n.Enable && !(n.NodeType == model.NodeTypeAgent && n.ConfigDirty) {
 			continue
 		}
 		wg.Add(1)

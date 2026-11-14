@@ -116,7 +116,8 @@ func (j *NodeTrafficSyncJob) Run() {
 	var activeMu sync.Mutex
 	var activeEmails []string
 	for _, n := range nodes {
-		if !n.Enable || n.Status != "online" {
+		pendingAgent := n.NodeType == model.NodeTypeAgent && n.ConfigDirty
+		if !pendingAgent && (!n.Enable || n.Status != "online") {
 			continue
 		}
 		wg.Add(1)
@@ -362,6 +363,21 @@ func (j *NodeTrafficSyncJob) maybePushGlobals(mgr *runtime.Manager, nodes []*mod
 // emails online on that node this tick, feeding the delta broadcast above the
 // snapshot threshold; nil on any failure path.
 func (j *NodeTrafficSyncJob) syncOne(mgr *runtime.Manager, n *model.Node, doIpSync bool) []string {
+	if n.NodeType != "" && n.NodeType != model.NodeTypePanel {
+		if n.NodeType == model.NodeTypeAgent && n.ConfigDirty {
+			ctx, cancel := context.WithTimeout(context.Background(), nodeReconcileTimeout)
+			result, err := j.nodeService.ApplyAgentConfig(ctx, n.Id)
+			cancel()
+			if err != nil || (result.Status != "applied" && result.Status != "disabled") {
+				logger.Warningf("node traffic sync: apply agent config for %s failed, retrying next tick: %v (status=%s)", n.Name, err, result.Status)
+				return nil
+			}
+			if clearErr := j.nodeService.ClearNodeDirty(n.Id, result.Generation); clearErr != nil {
+				logger.Warningf("node traffic sync: clear dirty for agent %s failed: %v", n.Name, clearErr)
+			}
+		}
+		return nil
+	}
 	rt, err := mgr.RemoteFor(n)
 	if err != nil {
 		logger.Warningf("node traffic sync: remote lookup failed for %s: %v", n.Name, err)

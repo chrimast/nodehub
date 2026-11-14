@@ -91,6 +91,8 @@ bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.
 
 安装过程中会生成随机的用户名、密码和访问路径。安装完成后，运行 `x-ui` 打开管理菜单，您可以在其中启动/停止服务、查看或重置登录凭据、管理 SSL 证书等。
 
+直接启动面板且用户表为空时，默认账号和密码为 `admin` / `admin`。这是弱口令，请在面板对外开放前于面板设置中修改；已有用户不会被覆盖。安装脚本会按上述流程单独设置凭据。
+
 每个发布资源都会在其旁边附带一个 `.sha256` 校验和。`install.sh` 和更新程序都会据此校验压缩包，不匹配时中止。
 
 完整文档（安装、配置、运维以及完整的 API 参考）请访问 **[docs.sanaei.dev](https://docs.sanaei.dev/zh)**。
@@ -148,6 +150,53 @@ docker compose --profile postgres up -d
 ```bash
 docker run -d --cap-add=NET_ADMIN --cap-add=NET_RAW ... ghcr.io/mhsanaei/3x-ui
 ```
+
+### 远程 nodehub-agent（实验性）
+
+这是独立的 agent，不是远程 3x-ui 面板，也不支持流量配额；不要用于生产环境。面板主动连接 agent，节点上的 Docker 需支持 Linux host 网络。以下操作使用可信的本仓库检出版本，先检查脚本内容；不要直接执行未经审查的远程脚本。
+
+1. 在远端构建镜像，或在构建机上构建后通过可信渠道传输到远端：
+
+   ```sh
+   docker build -f cmd/nodehub-agent/Dockerfile -t nodehub-agent:local .
+   # 在构建机执行，然后通过 SSH 将镜像导入远端：
+   docker save nodehub-agent:local | ssh user@node-host 'docker load'
+   ```
+
+   在构建机执行时需另行复制 `cmd/nodehub-agent/install.sh` 到远端并检查。构建依赖 Dockerfile 指定的 Go 基础镜像和 Xray 下载。Compose 默认名 `ghcr.io/chrimast/nodehub-xui-agent:latest` 只是可覆盖的目标名称，**不保证镜像已发布**；请使用自己构建或确认可用的镜像。
+
+2. 在远端以具备 Docker 权限的用户运行（以下以 root 为例）。证书必须匹配面板访问的域名且受面板信任，私钥应保密；`--listen` 使用远端实际可达的地址：
+
+   ```sh
+   sh install.sh --image nodehub-agent:local --listen 0.0.0.0:9443 \
+     --tls-cert /etc/nodehub-agent/tls/fullchain.pem \
+     --tls-key /etc/nodehub-agent/tls/privkey.pem
+   docker logs nodehub-agent
+   ```
+
+   默认监听 `127.0.0.1:9443`，跨主机面板无法直接访问；将监听地址改为可达地址后，用防火墙仅允许面板访问管理端口。脚本输出的 URL 若含 `0.0.0.0` 只是监听地址，不是面板应填写的地址。脚本在 `/var/lib/nodehub-agent` 保存 token、identity 和 Xray 配置，目录权限为 `0700`，token 为 `0600`；证书和私钥复制到该目录，续期后需更新副本并重启容器。每次成功安装都会输出 token；请保护终端和日志，避免 token 泄露。已有同名容器时脚本拒绝替换；升级前显式移除旧容器并保留状态目录。root 安装会将目录及相关文件所有者设为 UID/GID 10001。
+
+3. 在面板节点页面添加 **agent** 类型，填写 `https://节点证书域名:9443` 和脚本输出的 token，保存并测试连接；不要把 token 当作普通面板 API token。私网地址须按面板的私网地址允许选项显式配置。安装命令成功只表示容器已创建，仍需检查日志和面板探测结果。host 网络也会开放 Xray 动态配置的入站端口，应分别配置防火墙。丢弃所有 capability 的容器不能绑定特权端口（低于 1024），除非主机另有相关配置；不要为此盲目扩大权限。
+
+仅在可信加密隧道或可信网络中才可改用 HTTP：省略证书参数并显式传 `--http`，例如 `sh install.sh --image nodehub-agent:local --listen 0.0.0.0:9443 --http`；面板地址使用 `http://节点地址:9443`。HTTP 会暴露 token 和配置，不能视为加密传输。
+
+也可不用安装脚本、改用 [Compose 示例](cmd/nodehub-agent/docker-compose.yml.example)。以下在远端以 root 初始化全新专用目录；不要覆盖现有 token：
+
+```sh
+install -d -m 700 /var/lib/nodehub-agent
+test ! -e /var/lib/nodehub-agent/token || { echo 'token already exists' >&2; exit 1; }
+umask 077
+openssl rand -hex 32 > /var/lib/nodehub-agent/token
+install -m 600 /etc/nodehub-agent/tls/fullchain.pem /var/lib/nodehub-agent/tls-cert.pem
+install -m 600 /etc/nodehub-agent/tls/privkey.pem /var/lib/nodehub-agent/tls-key.pem
+chown -R 10001:10001 /var/lib/nodehub-agent
+export NODEHUB_AGENT_IMAGE=nodehub-agent:local
+export NODEHUB_AGENT_LISTEN=0.0.0.0:9443
+docker compose -f cmd/nodehub-agent/docker-compose.yml.example --profile https up -d
+docker compose -f cmd/nodehub-agent/docker-compose.yml.example --profile https logs
+```
+
+`NODEHUB_AGENT_DIR` 可覆盖状态目录（使用绝对路径，预先创建并设置权限）；读取 `/var/lib/nodehub-agent/token` 填入面板。HTTP 模式跳过证书准备，使用 `--profile http`，其余操作相同；两种 profile 只能选一种，切换前停止原服务，且不要与脚本安装的容器共用监听地址或状态目录。详见 [agent 说明](cmd/nodehub-agent/README.md)。
 
 ## 环境变量
 

@@ -12,6 +12,7 @@ import (
 type NodeView struct {
 	Id                  int      `json:"id" example:"1"`
 	Name                string   `json:"name" example:"edge-1"`
+	NodeType            string   `json:"nodeType" example:"panel"`
 	Remark              string   `json:"remark" example:"Primary edge"`
 	Scheme              string   `json:"scheme" example:"https"`
 	Address             string   `json:"address" example:"node.example.com"`
@@ -58,9 +59,14 @@ func toNodeView(n *model.Node) *NodeView {
 	if n == nil {
 		return nil
 	}
+	nodeType := n.NodeType
+	if nodeType == "" {
+		nodeType = model.NodeTypePanel
+	}
 	return &NodeView{
 		Id:                  n.Id,
 		Name:                n.Name,
+		NodeType:            string(nodeType),
 		Remark:              n.Remark,
 		Scheme:              n.Scheme,
 		Address:             n.Address,
@@ -118,6 +124,7 @@ func toNodeViews(nodes []*model.Node) []*NodeView {
 type NodeMutationRequest struct {
 	Id                  int      `json:"id" form:"id"`
 	Name                string   `json:"name" form:"name" validate:"required"`
+	NodeType            string   `json:"nodeType" form:"nodeType" validate:"omitempty,oneof=panel agent"`
 	Remark              string   `json:"remark" form:"remark"`
 	Scheme              string   `json:"scheme" form:"scheme" validate:"omitempty,oneof=http https"`
 	Address             string   `json:"address" form:"address" validate:"required"`
@@ -154,6 +161,9 @@ func (r *NodeMutationRequest) validateCredentials(create bool) error {
 		if r.ClearApiToken {
 			return common.NewError("credentials cannot be cleared while creating a node")
 		}
+		if r.NodeType == string(model.NodeTypeAgent) && r.ApiToken == nil {
+			return common.NewError("agent requires apiToken")
+		}
 		if r.ApiToken == nil && r.TlsVerifyMode != "mtls" {
 			return common.NewError("apiToken is required unless mtls is enabled")
 		}
@@ -168,6 +178,7 @@ func (r *NodeMutationRequest) toNode() *model.Node {
 	n := &model.Node{
 		Id:                  r.Id,
 		Name:                r.Name,
+		NodeType:            model.NodeType(r.NodeType),
 		Remark:              r.Remark,
 		Scheme:              r.Scheme,
 		Address:             r.Address,

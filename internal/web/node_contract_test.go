@@ -2,6 +2,8 @@ package web
 
 import (
 	"context"
+	"io"
+
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -100,6 +102,68 @@ func (n *nodeUnderContract) masterWithToken(t *testing.T, scope string) *runtime
 		Id: 1, Name: "contract-node", Scheme: "http", Address: u.Hostname(), Port: port,
 		BasePath: "/", ApiToken: token, Enable: true, AllowPrivateAddress: true,
 	}, nil)
+}
+
+func TestNeighborScanRejectsInvalidNodeID(t *testing.T) {
+	node := startContractNode(t)
+	_ = node.masterWithToken(t, model.ApiScopeAdmin)
+	for _, id := range []string{"invalid", "-1"} {
+		req, err := http.NewRequest(http.MethodPost, node.srv.URL+"/panel/api/server/scanRealityTargets", strings.NewReader("targets=%40local24&nodeId="+id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer contract-admin")
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		resp, err := node.srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(body), "invalid nodeId") {
+			t.Errorf("nodeId=%q response=%s", id, body)
+		}
+	}
+}
+
+func TestNeighborScanNodeSyncAuthorizationIsNarrow(t *testing.T) {
+	node := startContractNode(t)
+	_ = node.masterWithToken(t, model.ApiScopeNodeSync)
+	client := node.srv.Client()
+	for _, tc := range []struct {
+		path string
+		want int
+	}{
+		{"/panel/api/server/scanRealityNeighbors", http.StatusOK},
+		{"/panel/api/server/scanRealityTargets", http.StatusForbidden},
+		{"/panel/api/server/scanRealityTarget", http.StatusForbidden},
+		{"/panel/api/server/updatePanel", http.StatusForbidden},
+	} {
+		req, err := http.NewRequest(http.MethodPost, node.srv.URL+tc.path, strings.NewReader("targets=127.0.0.1&nodeId=42&limit=1"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer contract-node-sync")
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != tc.want {
+			t.Errorf("%s status=%d want=%d", tc.path, resp.StatusCode, tc.want)
+		}
+		if tc.want == http.StatusOK && !strings.Contains(string(body), "local public IPv4 is not available") {
+			t.Errorf("node-only route did not use local scan: %s", body)
+		}
+	}
 }
 
 func nodeRow(t *testing.T, tag string) (*model.Inbound, bool) {
@@ -270,6 +334,14 @@ func TestMasterNodeContract(t *testing.T) {
 				{"FetchTrafficSnapshot reads every part of the snapshot", []string{"FetchTrafficSnapshot"}, func() error {
 					_, err := master.FetchTrafficSnapshot(ctx)
 					return err
+				}, nil},
+				{"ScanRealityNeighbors reaches the node", []string{"ScanRealityNeighbors"}, func() error {
+					_, err := master.ScanRealityNeighbors(ctx, 1)
+
+					if err != nil && !strings.Contains(err.Error(), "local public IPv4 is not available") {
+						return err
+					}
+					return nil
 				}, nil},
 				{"PushGlobalClientTraffics is accepted", []string{"PushGlobalClientTraffics"}, func() error {
 					return master.PushGlobalClientTraffics(ctx, "master-guid", []*xray.ClientTraffic{{Email: "c0", Up: 1, Down: 2}})

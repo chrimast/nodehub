@@ -1,4 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { Form } from 'antd';
 import type { ReactNode } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
@@ -62,6 +64,7 @@ function renderRealityForm(
         scanResult={scanResult}
         scanRealityTarget={noop}
         scanRealityCandidates={async () => []}
+        scanRealityNeighbors={async () => []}
         applyRealityScanResult={noop}
         randomizeShortIds={noop}
         randomizeSpiderX={noop}
@@ -93,10 +96,30 @@ describe('ML-DSA-65 cert chain warning', () => {
         open
         onClose={noop}
         scanRealityCandidates={async () => [smallChain]}
+        scanRealityNeighbors={async () => [smallChain]}
         onPick={noop}
         mldsa65Enabled
       />,
     );
     expect(await findByText('3427 B')).toBeTruthy();
+  });
+
+  it('scans local neighbors on open and applies the selected result', async () => {
+    const user = userEvent.setup();
+    const neighbors = vi.fn(async () => [smallChain]);
+    const onPick = vi.fn();
+    renderWithProviders(
+      <RealityTargetScannerModal
+        open
+        onClose={vi.fn()}
+        scanRealityCandidates={async () => []}
+        scanRealityNeighbors={neighbors}
+        onPick={onPick}
+      />,
+    );
+
+    await waitFor(() => expect(neighbors).toHaveBeenCalledTimes(1));
+    await user.click(await screen.findByRole('button', { name: 'Use' }));
+    expect(onPick).toHaveBeenCalledWith(smallChain);
   });
 });

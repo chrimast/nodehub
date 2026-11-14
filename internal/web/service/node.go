@@ -32,6 +32,7 @@ import (
 )
 
 type HeartbeatPatch struct {
+	AgentCapabilities  *AgentCapabilities
 	Status             string
 	LastHeartbeat      int64
 	LatencyMs          int
@@ -400,8 +401,17 @@ func normalizeBasePath(p string) string {
 }
 
 func (s *NodeService) normalize(n *model.Node) error {
+	if n == nil {
+		return common.NewError("node is required")
+	}
 	n.Name = strings.TrimSpace(n.Name)
 	n.ApiToken = strings.TrimSpace(n.ApiToken)
+	if n.NodeType == "" {
+		n.NodeType = model.NodeTypePanel
+	}
+	if n.NodeType != model.NodeTypePanel && n.NodeType != model.NodeTypeAgent {
+		return common.NewError("nodeType must be panel or agent")
+	}
 	if n.Name == "" {
 		return common.NewError("node name is required")
 	}
@@ -419,6 +429,7 @@ func (s *NodeService) normalize(n *model.Node) error {
 	if n.TlsVerifyMode != "skip" && n.TlsVerifyMode != "pin" && n.TlsVerifyMode != "mtls" {
 		n.TlsVerifyMode = "verify"
 	}
+
 	if n.TlsVerifyMode == "mtls" && n.Scheme != "https" {
 		return common.NewError("mtls requires the node scheme to be https")
 	}
@@ -454,6 +465,9 @@ func (s *NodeService) normalize(n *model.Node) error {
 func (s *NodeService) Create(n *model.Node) error {
 	if err := s.normalize(n); err != nil {
 		return err
+	}
+	if n.NodeType == model.NodeTypeAgent && n.ApiToken == "" {
+		return common.NewError("agent requires apiToken")
 	}
 	db := database.GetDB()
 	if !nodetoken.Enabled() {
@@ -524,6 +538,12 @@ func (s *NodeService) Update(id int, in *model.Node) error {
 		return err
 	}
 	// Blank means keep the hidden stored token; non-blank values are encrypted.
+	if existing.NodeType != "" && existing.NodeType != in.NodeType {
+		return errors.New("changing node type is unsupported")
+	}
+	if existing.NodeType == "" && in.NodeType != model.NodeTypePanel {
+		return errors.New("changing node type is unsupported")
+	}
 	apiToken := existing.ApiToken
 	if in.ApiToken != "" {
 		enc, eerr := nodetoken.Encrypt(id, in.ApiToken)
@@ -547,6 +567,7 @@ func (s *NodeService) Update(id int, in *model.Node) error {
 		"inbound_sync_mode":     in.InboundSyncMode,
 		"inbound_tags":          string(inboundTagsJSON),
 		"outbound_tag":          in.OutboundTag,
+		"node_type":             in.NodeType,
 	}
 	if nodeSelectionGrew(existing, in) {
 		updates["inbounds_adopted_at"] = 0
@@ -554,6 +575,9 @@ func (s *NodeService) Update(id int, in *model.Node) error {
 	if err := db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(model.Node{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 			return err
+		}
+		if in.NodeType == model.NodeTypeAgent {
+			return nil
 		}
 		return s.MarkNodeDirtyTx(tx, id)
 	}); err != nil {
@@ -583,6 +607,12 @@ func (s *NodeService) UpdateFromRequest(id int, req *NodeMutationRequest) error 
 		return err
 	}
 	apiToken := existing.ApiToken
+	if existing.NodeType != "" && existing.NodeType != in.NodeType {
+		return errors.New("changing node type is unsupported")
+	}
+	if existing.NodeType == "" && in.NodeType != model.NodeTypePanel {
+		return errors.New("changing node type is unsupported")
+	}
 	switch {
 	case req.ClearApiToken:
 		apiToken = ""
@@ -592,7 +622,7 @@ func (s *NodeService) UpdateFromRequest(id int, req *NodeMutationRequest) error 
 			return err
 		}
 	}
-	if apiToken == "" && in.Enable && in.TlsVerifyMode != "mtls" {
+	if apiToken == "" && (in.NodeType == model.NodeTypeAgent || (in.Enable && in.TlsVerifyMode != "mtls")) {
 		return common.NewError("apiToken is required unless mtls is enabled")
 	}
 	updates := map[string]any{
@@ -610,6 +640,7 @@ func (s *NodeService) UpdateFromRequest(id int, req *NodeMutationRequest) error 
 		"inbound_sync_mode":     in.InboundSyncMode,
 		"inbound_tags":          string(inboundTagsJSON),
 		"outbound_tag":          in.OutboundTag,
+		"node_type":             in.NodeType,
 	}
 	if nodeSelectionGrew(existing, in) {
 		updates["inbounds_adopted_at"] = 0
@@ -617,6 +648,9 @@ func (s *NodeService) UpdateFromRequest(id int, req *NodeMutationRequest) error 
 	if err := db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(model.Node{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 			return err
+		}
+		if in.NodeType == model.NodeTypeAgent {
+			return nil
 		}
 		return s.MarkNodeDirtyTx(tx, id)
 	}); err != nil {
@@ -654,7 +688,7 @@ func (s *NodeService) RuntimeNodeFromRequest(id int, req *NodeMutationRequest) (
 	if err := s.normalize(n); err != nil {
 		return nil, err
 	}
-	if n.ApiToken == "" && n.Enable && n.TlsVerifyMode != "mtls" {
+	if n.ApiToken == "" && (n.NodeType == model.NodeTypeAgent || (n.Enable && n.TlsVerifyMode != "mtls")) {
 		return nil, common.NewError("apiToken is required unless mtls is enabled")
 	}
 	return n, nil
@@ -727,6 +761,9 @@ func (s *NodeService) MigrateNodeTokensToActiveKey() (int, int, error) {
 func (s *NodeService) GetRemoteInboundOptions(ctx context.Context, n *model.Node) ([]runtime.RemoteInboundOption, error) {
 	if err := s.normalize(n); err != nil {
 		return nil, err
+	}
+	if n.NodeType != model.NodeTypePanel {
+		return nil, errors.New("inbound sync unsupported for agent nodes")
 	}
 	if n.OutboundTag == "" {
 		return runtime.NewRemote(n, nil).ListInboundOptions(ctx)
@@ -851,6 +888,15 @@ func (s *NodeService) Delete(id int) error {
 	if attached > 0 {
 		return common.NewError(fmt.Sprintf("cannot delete node: %d inbound(s) still attached to it; detach or delete them first", attached))
 	}
+	var nodeState model.Node
+	nodeStateErr := db.Select("node_type", "config_dirty").Where("id = ?", id).First(&nodeState).Error
+	if nodeStateErr != nil && !errors.Is(nodeStateErr, gorm.ErrRecordNotFound) {
+		return nodeStateErr
+	}
+	nodeFound := nodeStateErr == nil
+	if nodeFound && nodeState.NodeType == model.NodeTypeAgent && nodeState.ConfigDirty {
+		return common.NewError("cannot delete agent: config has unsynchronized changes; wait for remote reconciliation before deleting")
+	}
 	// Capture the node's guid before deleting the row so we can drop its per-node
 	// IP attribution. NodeClientIp is keyed by the node's attribution key, which
 	// is its guid normally but its node-unique key for a cloned/ambiguous-guid
@@ -878,7 +924,14 @@ func (s *NodeService) Delete(id int) error {
 		if err := tx.Where("node_guid IN ?", guids).Delete(&model.NodeClientIp{}).Error; err != nil {
 			return err
 		}
-		return tx.Where("id = ?", id).Delete(&model.Node{}).Error
+		deleteResult := tx.Where("id = ? AND NOT (node_type = ? AND config_dirty = ?)", id, model.NodeTypeAgent, true).Delete(&model.Node{})
+		if deleteResult.Error != nil {
+			return deleteResult.Error
+		}
+		if nodeFound && deleteResult.RowsAffected == 0 {
+			return common.NewError("cannot delete agent: config became unsynchronized; wait for remote reconciliation before deleting")
+		}
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -892,14 +945,51 @@ func (s *NodeService) Delete(id int) error {
 }
 
 func (s *NodeService) SetEnable(id int, enable bool) error {
+	result, err := s.SetEnableWithResult(id, enable)
+	if err != nil && result.Status == "unknown" {
+		// Preserve the historical fire-and-retry service contract. API callers use
+		// SetEnableWithResult to expose the remote failure instead of claiming
+		// success.
+		return nil
+	}
+	return err
+}
+
+func (s *NodeService) SetEnableWithResult(id int, enable bool) (AgentApplyResult, error) {
 	db := database.GetDB()
-	if err := db.Model(model.Node{}).Where("id = ?", id).Update("enable", enable).Error; err != nil {
-		return err
+	var n model.Node
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.First(&n, id).Error; err != nil {
+			return err
+		}
+		if n.NodeType == model.NodeTypeAgent {
+			if err := s.MarkNodeDirtyTx(tx, id); err != nil {
+				return err
+			}
+		}
+		return tx.Model(model.Node{}).Where("id = ?", id).Update("enable", enable).Error
+	}); err != nil {
+		return AgentApplyResult{Status: "failed"}, err
 	}
 	if mgr := runtime.GetManager(); mgr != nil {
 		mgr.InvalidateNode(id)
 	}
-	return nil
+	if n.NodeType != model.NodeTypeAgent {
+		return AgentApplyResult{}, nil
+	}
+	if !enable && n.Status == "offline" {
+		return AgentApplyResult{Status: "unknown"}, errors.New("agent is offline; remote disable is pending")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	result, err := s.ApplyAgentConfig(ctx, id)
+	cancel()
+	if err != nil || !result.Applied {
+		return result, err
+	}
+	if err := s.ClearNodeDirty(id, result.Generation); err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 // GetWebCertFiles asks a node for its own web TLS certificate/key file paths,
@@ -1018,9 +1108,15 @@ func (s *NodeService) UpdateHeartbeat(id int, p HeartbeatPatch) error {
 		if !slices.Contains(p.UnavailableMetrics, "cpu") {
 			nodeMetrics.append(nodeMetricKey(id, "cpu"), now, p.CpuPct)
 		}
-		nodeMetrics.append(nodeMetricKey(id, "mem"), now, p.MemPct)
-		nodeMetrics.append(nodeMetricKey(id, "netUp"), now, float64(p.NetUp))
-		nodeMetrics.append(nodeMetricKey(id, "netDown"), now, float64(p.NetDown))
+		if !slices.Contains(p.UnavailableMetrics, "mem") {
+			nodeMetrics.append(nodeMetricKey(id, "mem"), now, p.MemPct)
+		}
+		if !slices.Contains(p.UnavailableMetrics, "netUp") {
+			nodeMetrics.append(nodeMetricKey(id, "netUp"), now, float64(p.NetUp))
+		}
+		if !slices.Contains(p.UnavailableMetrics, "netDown") {
+			nodeMetrics.append(nodeMetricKey(id, "netDown"), now, float64(p.NetDown))
+		}
 	}
 	return nil
 }
@@ -1060,11 +1156,22 @@ func (s *NodeService) MarkNodeDirtyTx(tx *gorm.DB, id int) error {
 	if tx == nil {
 		return errors.New("nil db transaction")
 	}
+	var node model.Node
+	if err := tx.Select("node_type").First(&node, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	if node.NodeType != "" && node.NodeType != model.NodeTypePanel && node.NodeType != model.NodeTypeAgent {
+		return errors.New("config sync unsupported for this node type")
+	}
+	now := time.Now().UnixMilli()
 	return tx.Model(model.Node{}).
 		Where("id = ?", id).
 		Updates(map[string]any{
 			"config_dirty":    true,
-			"config_dirty_at": time.Now().UnixMilli(),
+			"config_dirty_at": gorm.Expr("CASE WHEN config_dirty_at >= ? THEN config_dirty_at + 1 ELSE ? END", now, now),
 		}).Error
 }
 
@@ -1098,11 +1205,14 @@ func (s *NodeService) NodeSyncState(id int) (enabled bool, status string, dirty 
 	}
 	var row model.Node
 	err = database.GetDB().Model(model.Node{}).
-		Select("enable", "status", "config_dirty", "config_dirty_at").
+		Select("enable", "status", "config_dirty", "config_dirty_at", "node_type").
 		Where("id = ?", id).
 		First(&row).Error
 	if err != nil {
 		return false, "", false, 0, err
+	}
+	if row.NodeType != "" && row.NodeType != model.NodeTypePanel && row.NodeType != model.NodeTypeAgent {
+		return false, "", false, 0, errors.New("config sync unsupported for this node type")
 	}
 	return row.Enable, row.Status, row.ConfigDirty, row.ConfigDirtyAt, nil
 }
@@ -1291,6 +1401,16 @@ const maxPanelGuidLen = 64
 
 func (s *NodeService) probe(ctx context.Context, n *model.Node, proxyURL string) (HeartbeatPatch, error) {
 	patch := HeartbeatPatch{LastHeartbeat: time.Now().Unix()}
+	if n.NodeType != "" && n.NodeType != model.NodeTypePanel && n.NodeType != model.NodeTypeAgent {
+		return patch, errors.New("unsupported node type")
+	}
+	if n.NodeType == model.NodeTypeAgent {
+		patch.UnavailableMetrics = []string{"cpu", "mem", "netUp", "netDown", "uptime"}
+		if n.ApiToken == "" {
+			patch.LastError = "agent requires apiToken"
+			return patch, errors.New(patch.LastError)
+		}
+	}
 
 	addr, err := netsafe.NormalizeHost(n.Address)
 	if err != nil {
@@ -1311,6 +1431,9 @@ func (s *NodeService) probe(ctx context.Context, n *model.Node, proxyURL string)
 		Path:   normalizeBasePath(n.BasePath) + "panel/api/server/status",
 	}
 
+	if n.NodeType == model.NodeTypeAgent {
+		probeURL.Path = normalizeBasePath(n.BasePath) + "v1/status"
+	}
 	req, err := http.NewRequestWithContext(
 		netsafe.ContextWithAllowPrivate(ctx, n.AllowPrivateAddress),
 		http.MethodGet, probeURL.String(), nil)
@@ -1345,7 +1468,42 @@ func (s *NodeService) probe(ctx context.Context, n *model.Node, proxyURL string)
 
 	if resp.StatusCode != http.StatusOK {
 		patch.LastError = fmt.Sprintf("HTTP %d from remote panel", resp.StatusCode)
+		if n.NodeType == model.NodeTypeAgent {
+			patch.LastError = fmt.Sprintf("HTTP %d from remote agent", resp.StatusCode)
+		}
 		return patch, errors.New(patch.LastError)
+	}
+	if n.NodeType == model.NodeTypeAgent {
+		var status struct {
+			ID        string          `json:"id"`
+			Status    string          `json:"status"`
+			XrayState json.RawMessage `json:"xray_status"`
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxProbeBodyBytes+1))
+		if readErr != nil || len(body) > maxProbeBodyBytes || json.Unmarshal(body, &status) != nil || status.ID == "" || len(status.ID) > 64 || status.Status != "ready" {
+			patch.LastError = "invalid agent status response"
+			return patch, errors.New(patch.LastError)
+		}
+		var xrayState string
+		if json.Unmarshal(status.XrayState, &xrayState) == nil && (xrayState == "running" || xrayState == "stopped") {
+			patch.XrayState = xrayState
+		}
+		capURL := *probeURL
+		capURL.Path = normalizeBasePath(n.BasePath) + "v1/capabilities"
+		capReq, capErr := http.NewRequestWithContext(req.Context(), http.MethodGet, capURL.String(), nil)
+		if capErr == nil {
+			capReq.Header = req.Header.Clone()
+			if capResp, requestErr := client.Do(capReq); requestErr == nil {
+				if capResp.StatusCode == http.StatusOK {
+					if caps, decodeErr := decodeAgentCapabilities(capResp.Body); decodeErr == nil {
+						caps.RuntimeHealth = caps.RuntimeHealth && (patch.XrayState == "running" || patch.XrayState == "stopped")
+						patch.AgentCapabilities = &caps
+					}
+				}
+				capResp.Body.Close()
+			}
+		}
+		return patch, nil
 	}
 
 	var envelope struct {
@@ -1408,15 +1566,16 @@ func (s *NodeService) probe(ctx context.Context, n *model.Node, proxyURL string)
 }
 
 type ProbeResultUI struct {
-	Status             string   `json:"status" example:"online"`
-	LatencyMs          int      `json:"latencyMs" example:"42"`
-	XrayVersion        string   `json:"xrayVersion" example:"25.10.31"`
-	PanelVersion       string   `json:"panelVersion" example:"v3.x.x"`
-	CpuPct             float64  `json:"cpuPct" example:"12.5"`
-	MemPct             float64  `json:"memPct" example:"45.2"`
-	UptimeSecs         uint64   `json:"uptimeSecs" example:"86400"`
-	UnavailableMetrics []string `json:"unavailableMetrics,omitempty"`
-	Error              string   `json:"error"`
+	AgentCapabilities  *AgentCapabilities `json:"agentCapabilities,omitempty"`
+	Status             string             `json:"status" example:"online"`
+	LatencyMs          int                `json:"latencyMs" example:"42"`
+	XrayVersion        string             `json:"xrayVersion" example:"25.10.31"`
+	PanelVersion       string             `json:"panelVersion" example:"v3.x.x"`
+	CpuPct             float64            `json:"cpuPct" example:"12.5"`
+	MemPct             float64            `json:"memPct" example:"45.2"`
+	UptimeSecs         uint64             `json:"uptimeSecs" example:"86400"`
+	UnavailableMetrics []string           `json:"unavailableMetrics,omitempty"`
+	Error              string             `json:"error"`
 	// XrayState/XrayError are populated on successful probes even when the node's
 	// Xray core is not healthy. The UI uses them for a distinct "panel ok, xray failed" indicator.
 	XrayState string `json:"xrayState"`
@@ -1425,6 +1584,7 @@ type ProbeResultUI struct {
 
 func (p HeartbeatPatch) ToUI(ok bool) ProbeResultUI {
 	r := ProbeResultUI{
+		AgentCapabilities:  p.AgentCapabilities,
 		LatencyMs:          p.LatencyMs,
 		XrayVersion:        p.XrayVersion,
 		PanelVersion:       p.PanelVersion,

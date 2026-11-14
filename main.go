@@ -114,14 +114,13 @@ func runWebServer() {
 	if err != nil {
 		log.Fatalf("Error initializing database: %v", err)
 	}
-	// Created here, not in InitDB: a CLI call's output is often piped away, and
-	// this log is the one place an operator reads the first login from.
+	// Create the default user only when the server starts, not during CLI operations.
 	username, password, err := database.EnsureFirstUser()
 	if err != nil {
 		log.Fatalf("Error creating the first panel user: %v", err)
 	}
 	if password != "" {
-		log.Printf("No panel user existed, so one was generated. Username: %s  Password: %s  (shown once; change it in Panel Settings)", username, password)
+		log.Printf("No panel user existed; created default login %s/%s. WARNING: this is a weak password; change it in Panel Settings before exposing the panel.", username, password)
 	}
 
 	server := web.NewServer(sub.NewLinkProvider())

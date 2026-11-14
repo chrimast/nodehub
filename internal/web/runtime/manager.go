@@ -103,6 +103,9 @@ func (m *Manager) RuntimeFor(nodeID *int) (Runtime, error) {
 	if !n.Enable {
 		return nil, errors.New("node " + n.Name + " is disabled")
 	}
+	if n.NodeType != "" && n.NodeType != model.NodeTypePanel {
+		return nil, errors.New("panel runtime unsupported for this node type")
+	}
 	rt := NewRemote(n, m.egressResolver)
 	m.remotes[*nodeID] = rt
 	return rt, nil
@@ -113,6 +116,9 @@ func (m *Manager) Local() Runtime { return m.local }
 func (m *Manager) RemoteFor(node *model.Node) (*Remote, error) {
 	if node == nil {
 		return nil, errors.New("node is nil")
+	}
+	if node.NodeType != "" && node.NodeType != model.NodeTypePanel {
+		return nil, errors.New("panel runtime unsupported for this node type")
 	}
 	m.mu.RLock()
 	if rt, ok := m.remotes[node.Id]; ok {

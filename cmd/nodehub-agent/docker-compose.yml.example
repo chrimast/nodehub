@@ -1,0 +1,55 @@
+# Select exactly one profile: https (recommended) or http (trusted tunnel only).
+x-agent: &agent
+  image: ${NODEHUB_AGENT_IMAGE:-ghcr.io/chrimast/nodehub-xui-agent:latest}
+  network_mode: host
+  restart: unless-stopped
+  user: "10001:10001"
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=64m
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 128
+  volumes:
+    - type: bind
+      source: ${NODEHUB_AGENT_DIR:-/var/lib/nodehub-agent}
+      target: /var/lib/nodehub-agent
+      bind:
+        create_host_path: false
+
+services:
+  agent-https:
+    <<: *agent
+    profiles: [https]
+    command:
+      - -listen
+      - ${NODEHUB_AGENT_LISTEN:-127.0.0.1:9443}
+      - -token-file
+      - /var/lib/nodehub-agent/token
+      - -identity-file
+      - /var/lib/nodehub-agent/identity
+      - -config-file
+      - /var/lib/nodehub-agent/config.json
+      - -xray
+      - /usr/local/bin/xray
+      - -tls-cert
+      - /var/lib/nodehub-agent/tls-cert.pem
+      - -tls-key
+      - /var/lib/nodehub-agent/tls-key.pem
+  agent-http:
+    <<: *agent
+    profiles: [http]
+    command:
+      - -listen
+      - ${NODEHUB_AGENT_LISTEN:-127.0.0.1:9443}
+      - -token-file
+      - /var/lib/nodehub-agent/token
+      - -identity-file
+      - /var/lib/nodehub-agent/identity
+      - -config-file
+      - /var/lib/nodehub-agent/config.json
+      - -xray
+      - /usr/local/bin/xray
+      - -allow-http

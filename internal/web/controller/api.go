@@ -124,10 +124,12 @@ var nodeSyncScopeAllow = map[string]map[string]struct{}{
 	"/server/clientIps":            {http.MethodGet: {}, http.MethodPost: {}},
 	"/clients/clientIpsByGuid":     {http.MethodPost: {}},
 	"/hosts/list":                  {http.MethodGet: {}},
+	"/server/scanRealityNeighbors": {http.MethodPost: {}},
 }
 
 var nodeAdminScopeAllow = map[string]map[string]struct{}{
-	"/server/updatePanel": {http.MethodPost: {}},
+	"/server/updatePanel":         {http.MethodPost: {}},
+	"/nodes/applyAgentConfig/:id": {http.MethodPost: {}},
 }
 
 func scopeAllows(allow map[string]map[string]struct{}, path, method string) bool {

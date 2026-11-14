@@ -41,7 +41,7 @@ func run(root, outDir string) error {
 				"Host",
 				"SubBalancer",
 			),
-			AliasAllow: setOf("Protocol"),
+			AliasAllow: setOf("NodeType", "Protocol"),
 			Overrides: map[string][]walkOverride{
 				"Inbound": {
 					{Field: "Settings", Kind: KindAny},
@@ -109,6 +109,7 @@ func run(root, outDir string) error {
 				"NodeMutationRequest",
 				"NodeView",
 				"ProbeResultUI",
+				"AgentCapabilities",
 				"RealityScanResult",
 				"GeodataTokenIssue",
 				"AmneziaWGLogs",

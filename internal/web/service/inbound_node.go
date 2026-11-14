@@ -102,6 +102,9 @@ func (s *InboundService) AnyNodePending(inboundIds []int) bool {
 // node rejects (e.g. a legacy protocol failing validation, #5685) must not
 // stall the rest of the node's config — or, via syncOne, its traffic sync.
 func (s *InboundService) ReconcileNode(ctx context.Context, rt *runtime.Remote, n *model.Node) error {
+	if n != nil && n.NodeType != "" && n.NodeType != model.NodeTypePanel {
+		return errors.New("config sync unsupported for this node type")
+	}
 	if rt == nil || n == nil || n.Id <= 0 {
 		return nil
 	}
@@ -389,6 +392,19 @@ func (s *InboundService) SnapshotHasUnadoptedInbounds(nodeID int, snap *runtime.
 // SetRemoteTraffic merges a node snapshot. justPushed marks the tick whose
 // config push just landed, whose snapshot may still predate it (#6228).
 func (s *InboundService) SetRemoteTraffic(nodeID int, snap *runtime.TrafficSnapshot, dirty, justPushed bool) (bool, error) {
+	if _, _, _, _, err := (&NodeService{}).NodeSyncState(nodeID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			s.ClearNodeOnlineClients(nodeID)
+		}
+		return false, err
+	}
+	var node model.Node
+	if err := database.GetDB().Select("node_type").First(&node, nodeID).Error; err != nil {
+		return false, err
+	}
+	if node.NodeType == model.NodeTypeAgent {
+		return false, errors.New("traffic sync unsupported for agent nodes")
+	}
 	var structuralChange bool
 	// Node merges take the background lane: a per-client mutation the operator
 	// is waiting on must not queue behind the next batch of 5s snapshots.

@@ -6,6 +6,9 @@ export type BlockerCode = z.infer<typeof BlockerCodeSchema>;
 export const GeoKindSchema = z.string();
 export type GeoKind = z.infer<typeof GeoKindSchema>;
 
+export const NodeTypeSchema = z.string();
+export type NodeType = z.infer<typeof NodeTypeSchema>;
+
 export const OnlineAPISupportSchema = z.number().int();
 export type OnlineAPISupport = z.infer<typeof OnlineAPISupportSchema>;
 
@@ -26,6 +29,14 @@ export type trafficLocalApplyAction = z.infer<typeof trafficLocalApplyActionSche
 
 export const transportBitsSchema = z.number().int();
 export type transportBits = z.infer<typeof transportBitsSchema>;
+
+export const AgentCapabilitiesSchema = z.object({
+  config_apply: z.boolean(),
+  config_save: z.boolean(),
+  runtime_health: z.boolean(),
+  version: z.number().int(),
+});
+export type AgentCapabilities = z.infer<typeof AgentCapabilitiesSchema>;
 
 export const AllSettingSchema = z.object({
   datepicker: z.string(),
@@ -910,6 +921,7 @@ export const NodeSchema = z.object({
   name: z.string(),
   netDown: z.number().int(),
   netUp: z.number().int(),
+  nodeType: z.enum(['panel', 'agent']),
   onlineCount: z.number().int(),
   outboundTag: z.string(),
   panelVersion: z.string(),
@@ -941,6 +953,7 @@ export const NodeMutationRequestSchema = z.object({
   inboundSyncMode: z.enum(['all', 'selected']),
   inboundTags: z.array(z.string()),
   name: z.string(),
+  nodeType: z.enum(['panel', 'agent']),
   outboundTag: z.string(),
   pinnedCertSha256: z.string(),
   port: z.number().int().min(1).max(65535),
@@ -976,6 +989,7 @@ export const NodeViewSchema = z.object({
   name: z.string(),
   netDown: z.number().int(),
   netUp: z.number().int(),
+  nodeType: z.string(),
   onlineCount: z.number().int(),
   outboundTag: z.string(),
   panelVersion: z.string(),
@@ -1028,6 +1042,7 @@ export const PeerActivitySchema = z.object({
 export type PeerActivity = z.infer<typeof PeerActivitySchema>;
 
 export const ProbeResultUISchema = z.object({
+  agentCapabilities: z.lazy(() => AgentCapabilitiesSchema).nullable().optional(),
   cpuPct: z.number(),
   error: z.string(),
   latencyMs: z.number().int(),

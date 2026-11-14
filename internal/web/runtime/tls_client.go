@@ -158,6 +158,7 @@ func newNodeTransport(tlsCfg *tls.Config) *http.Transport {
 // defaultNodeHTTPClient reaches nodes trusting the system CA store ("verify"
 // mode or plain http); shared so connections pool across nodes.
 var defaultNodeHTTPClient = &http.Client{Transport: newNodeTransport(nil), CheckRedirect: NoCrossHostRedirect}
+var privateNodeHTTPClient = &http.Client{Transport: newNodeTransport(nil), CheckRedirect: NoCrossHostRedirect}
 
 // NoCrossHostRedirect keeps a request on the host:port it was sent to: the master presents
 // the same credentials to every node, so a node's Location must not carry them elsewhere.
@@ -183,7 +184,7 @@ var (
 // nodeClientIdentity covers everything that decides how the node is trusted; the
 // proxy URL is a variant of it, so it stays out of the identity itself.
 func nodeClientIdentity(n *model.Node, mode string) string {
-	return fmt.Sprintf("%d|%s|%s|%s|%d|%s", n.Id, mode, n.Scheme, n.Address, n.Port, n.PinnedCertSha256)
+	return fmt.Sprintf("%d|%s|%s|%s|%d|%s|%t", n.Id, mode, n.Scheme, n.Address, n.Port, n.PinnedCertSha256, n.AllowPrivateAddress)
 }
 
 // dropNodeClients discards every cached client of one node except keep, so a
@@ -211,6 +212,9 @@ func HTTPClientForNode(n *model.Node, proxyURL string) (*http.Client, error) {
 			nodeClientsMu.Lock()
 			dropNodeClients(n.Id, "")
 			nodeClientsMu.Unlock()
+			if n.AllowPrivateAddress {
+				return privateNodeHTTPClient, nil
+			}
 			return defaultNodeHTTPClient, nil
 		}
 	}

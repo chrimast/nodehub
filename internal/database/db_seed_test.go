@@ -90,12 +90,18 @@ func TestEnsureFirstUserCreatesOneWorkingCredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureFirstUser: %v", err)
 	}
+	if username != "admin" || password != "admin" {
+		t.Fatalf("first user = %q/%q, want admin/admin", username, password)
+	}
 	var stored model.User
 	if err := db.First(&stored).Error; err != nil {
 		t.Fatalf("read user: %v", err)
 	}
 	if stored.Username != username || password == "" || !crypto.CheckPasswordHash(stored.Password, password) {
 		t.Fatalf("returned %q/%q, stored user %q does not log in with it", username, password, stored.Username)
+	}
+	if stored.Password == password || !crypto.IsHashed(stored.Password) {
+		t.Fatal("default password must be stored as a hash")
 	}
 
 	againUser, againPass, err := EnsureFirstUser()
@@ -105,6 +111,39 @@ func TestEnsureFirstUserCreatesOneWorkingCredential(t *testing.T) {
 	var count int64
 	if err := db.Model(&model.User{}).Count(&count).Error; err != nil || count != 1 {
 		t.Fatalf("users = %d (%v), want 1", count, err)
+	}
+}
+
+func TestEnsureFirstUserPreservesExistingAdministrator(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "x-ui.db")
+	if err := InitDB(path); err != nil {
+		t.Fatalf("InitDB: %v", err)
+	}
+	t.Cleanup(func() { _ = CloseDB() })
+	hash, err := crypto.HashPasswordAsBcrypt("custom-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	existing := model.User{Username: "custom-admin", Password: hash}
+	if err := db.Create(&existing).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := CloseDB(); err != nil {
+		t.Fatal(err)
+	}
+	if err := InitDB(path); err != nil {
+		t.Fatal(err)
+	}
+	username, password, err := EnsureFirstUser()
+	if err != nil || username != "" || password != "" {
+		t.Fatalf("EnsureFirstUser = %q, %q, %v; want no creation", username, password, err)
+	}
+	var users []model.User
+	if err := db.Find(&users).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(users) != 1 || users[0].Id != existing.Id || users[0].Username != existing.Username || users[0].Password != hash {
+		t.Fatalf("existing administrator changed: %+v", users)
 	}
 }
 

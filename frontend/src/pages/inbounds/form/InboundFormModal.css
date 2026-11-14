@@ -50,6 +50,31 @@
   line-height: 1.5;
 }
 
+.reality-target-controls {
+  align-items: stretch;
+}
+
+.reality-target-controls .ant-form-item {
+  min-width: 0;
+  flex: 1;
+}
+
+.reality-target-scanner-modal .ant-modal-body {
+  overflow-x: hidden;
+}
+
+@media (max-width: 576px) {
+  .reality-target-controls {
+    display: grid !important;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .reality-target-controls .ant-btn {
+    min-height: 44px;
+  }
+}
+
 @media (max-width: 768px) {
   .advanced-panel {
     padding: 12px;

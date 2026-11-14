@@ -9,6 +9,11 @@ import { createTlsSettingsWithDefaultCert } from '@/lib/xray/inbound-tls-default
 import { RealityStreamSettingsSchema } from '@/schemas/protocols/security/reality';
 import type { InboundFormValues } from '@/schemas/forms/inbound-form';
 import type { RealityScanResult } from '@/generated/types';
+import {
+  buildRealityNeighborScanPayload,
+  extractRealityScanResults,
+  selectRealityServerNames,
+} from './security/reality-scan';
 
 interface UseSecurityActionsArgs {
   methods: UseFormReturn<InboundFormValues>;
@@ -95,7 +100,7 @@ export function useSecurityActions({
      * SNI recovers instead of failing every rescan.
      */
     if (replaceServerNames) {
-      setValue('streamSettings.realitySettings.serverNames', r.serverNames ?? []);
+      setValue('streamSettings.realitySettings.serverNames', selectRealityServerNames(r));
     } else if ((r.certValid || r.certChainValid) && r.serverNames?.length) {
       setValue('streamSettings.realitySettings.serverNames', r.serverNames);
     }
@@ -171,6 +176,19 @@ export function useSecurityActions({
       return [];
     }
     return msg.obj;
+  };
+
+  const scanRealityNeighbors = async (): Promise<RealityScanResult[]> => {
+    const msg = await HttpUtil.post<unknown>(
+      '/panel/api/server/scanRealityTargets',
+      buildRealityNeighborScanPayload(nodeId),
+      { silent: true },
+    );
+    if (!msg?.success) {
+      messageApi.error(msg?.msg || t('pages.inbounds.toasts.scanRealityTargetError'));
+      return [];
+    }
+    return extractRealityScanResults(msg.obj);
   };
 
   const randomizeShortIds = () => {
@@ -380,6 +398,7 @@ export function useSecurityActions({
     clearMldsa65,
     scanRealityTarget,
     scanRealityCandidates,
+    scanRealityNeighbors,
     applyRealityScanResult,
     randomizeShortIds,
     randomizeSpiderX,

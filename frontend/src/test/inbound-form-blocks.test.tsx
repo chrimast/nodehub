@@ -103,6 +103,7 @@ describe('inbound security forms', () => {
         scanResult={null}
         scanRealityTarget={noop}
         scanRealityCandidates={async () => []}
+        scanRealityNeighbors={async () => []}
         applyRealityScanResult={noop}
         randomizeShortIds={noop}
         randomizeSpiderX={noop}

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -23,11 +24,14 @@ import (
 
 var filenameRegex = regexp.MustCompile(`^[a-zA-Z0-9_\-.]+$`)
 
+const realityNeighborRequestTimeout = 45 * time.Second
+
 // ServerController handles server management and status-related operations.
 type ServerController struct {
 	BaseController
 
 	serverService      service.ServerService
+	nodeService        service.NodeService
 	settingService     service.SettingService
 	panelService       panel.PanelService
 	xrayMetricsService service.XrayMetricsService
@@ -83,6 +87,7 @@ func (a *ServerController) initRouter(g *gin.RouterGroup) {
 	g.POST("/getRemoteCertHash", a.getRemoteCertHash)
 	g.POST("/scanRealityTarget", a.scanRealityTarget)
 	g.POST("/scanRealityTargets", a.scanRealityTargets)
+	g.POST("/scanRealityNeighbors", a.scanRealityNeighbors)
 	g.POST("/clientIps", a.setClientIps)
 }
 
@@ -495,10 +500,54 @@ func (a *ServerController) scanRealityTarget(c *gin.Context) {
 	jsonObj(c, res, nil)
 }
 
+// scanRealityNeighbors only scans this node's own public /24.
+func (a *ServerController) scanRealityNeighbors(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.PostForm("limit"))
+	ctx, cancel := context.WithTimeout(c.Request.Context(), realityNeighborRequestTimeout)
+	defer cancel()
+	results, scanned, err := a.serverService.ScanRealityNeighborsLocal(ctx, limit)
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.scanRealityTargetError"), err)
+		return
+	}
+	jsonObj(c, gin.H{"results": results, "scanned": scanned, "nodeId": 0}, nil)
+}
+
 // scanRealityTargets probes the supplied comma-separated targets, or the
 // realityScanCandidates setting when empty, ranked by feasibility then latency.
 func (a *ServerController) scanRealityTargets(c *gin.Context) {
-	res, err := a.serverService.ScanRealityTargets(c.PostForm("targets"))
+	targets := c.PostForm("targets")
+	if targets == "@local24" {
+		limit, _ := strconv.Atoi(c.PostForm("limit"))
+		nodeID := 0
+		if raw := c.PostForm("nodeId"); raw != "" {
+			var err error
+			nodeID, err = strconv.Atoi(raw)
+			if err != nil || nodeID < 0 {
+				jsonMsg(c, "invalid nodeId", errors.New("nodeId must be a non-negative integer"))
+				return
+			}
+		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), realityNeighborRequestTimeout)
+		defer cancel()
+		if nodeID > 0 {
+			results, scanned, scanErr := a.nodeService.ScanRealityNeighborsForNode(ctx, nodeID, limit)
+			if scanErr != nil {
+				jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.scanRealityTargetError"), scanErr)
+				return
+			}
+			jsonObj(c, gin.H{"results": results, "scanned": scanned, "nodeId": nodeID}, nil)
+			return
+		}
+		results, scanned, scanErr := a.serverService.ScanRealityNeighborsLocal(ctx, limit)
+		if scanErr != nil {
+			jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.scanRealityTargetError"), scanErr)
+			return
+		}
+		jsonObj(c, gin.H{"results": results, "scanned": scanned, "nodeId": 0}, nil)
+		return
+	}
+	res, err := a.serverService.ScanRealityTargets(targets)
 	if err != nil {
 		jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.scanRealityTargetError"), err)
 		return

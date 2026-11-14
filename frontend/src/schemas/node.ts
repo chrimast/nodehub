@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const NodeRecordSchema = z
   .object({
     id: z.number(),
+    nodeType: z.enum(['panel', 'agent']).optional(),
     name: z.string().optional(),
     remark: z.string().optional(),
     scheme: z.string().optional(),
@@ -66,6 +67,7 @@ export const ProbeResultSchema = z
 export const NodeFormSchema = z
   .object({
     id: z.number().optional(),
+    nodeType: z.enum(['panel', 'agent']).default('panel'),
     name: z.string().trim().min(1, 'pages.nodes.toasts.fillRequired'),
     remark: z.string().optional(),
     scheme: z.enum(['http', 'https']),
@@ -90,6 +92,13 @@ export const NodeFormSchema = z
     outboundTag: z.string().optional(),
   })
   .superRefine((val, ctx) => {
+    if (val.nodeType === 'agent' && val.tlsVerifyMode === 'mtls') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['scheme'],
+        message: 'pages.nodes.agentTransportError',
+      });
+    }
     if (val.tlsVerifyMode !== 'mtls' && val.apiToken.length === 0 && !val.hasStoredToken) {
       ctx.addIssue({
         code: 'custom',
