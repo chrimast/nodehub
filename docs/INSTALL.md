@@ -20,8 +20,8 @@ Debian/Ubuntu 的 Python 可由发行版仓库安装：apt install python3 curl�
 |---|---|---|
 |Compose|Ubuntu/Debian、Rocky/Alma/Fedora、openSUSE、Alpine|已有官方Docker Engine、Compose v2、Python3、bash；Alpine另装bash|
 |Compose|Windows 10/11等受支持Desktop系统|Docker Desktop使用Linux容器；Windows Server使用受支持的Linux VM|
-|源码原生|Linux/Windows amd64、arm64|Go1.27.3+、Node22.12+；控制面运行还需PostgreSQL17|
-|预编译原生|Linux/Windows amd64、arm64|手动GitHub Build工作流；控制面需PostgreSQL，Agent不需要|
+|源码原生|Linux/Windows amd64、arm64|Go1.27.3+、Node22.12+；控制面使用内置 SQLite|
+|预编译原生|Linux/Windows amd64、arm64|手动GitHub Build工作流；控制面使用内置 SQLite，Agent 不需要数据库|
 |常驻Agent|systemd Linux / Windows桌面|普通用户systemd服务 / 当前用户登录计划任务|
 
 脚本不静默升级系统Docker、数据库或覆盖已有服务。Docker安装参考 <https://docs.docker.com/engine/install/>。
@@ -56,10 +56,10 @@ python scripts/prepare.py
 
 **预编译包跳过 build 步骤，直接运行 `python scripts/prepare.py`；使用 `bin/` 和随附的 `web/dist`。Compose 必须下载完整源码包，二进制包不含 Compose 构建上下文。**
 
-为本机PostgreSQL创建独立harbor用户和数据库，用随机密码，仅监听回环。给私有.env添加：
+给私有 `.env` 添加 SQLite 数据库路径；目录需要由运行控制面的用户私有拥有：
 
 ```dotenv
-DATABASE_URL=postgres://harbor:YOUR_PASSWORD@127.0.0.1:5432/harbor?sslmode=disable
+DATABASE_URL=sqlite:///opt/nodehub/state/nodehub.db
 WEB_DIR=/ABSOLUTE/PROJECT/web/dist
 HTTP_ADDR=127.0.0.1:8080
 SHARE_ADDR=127.0.0.1:8091

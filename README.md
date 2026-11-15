@@ -76,7 +76,7 @@ python3 -c 'import secrets; print("ADMIN_TOKEN="+secrets.token_urlsafe(32)); pri
 docker compose up -d --build
 ```
 
-官方 PostgreSQL 一键安装脚本不适用于本分支。
+官方 PostgreSQL 一键安装脚本不适用于本分支；本分支使用 SQLite Compose 部署。
 
 补齐 Linux 一键安装的 Nginx、Certbot / Cloudflare DNS 插件与受控网关助手；已有安装可单独修复，保留数据库和令牌。[0.25.5 发布说明](docs/RELEASE-v0255.md)。
 
@@ -116,7 +116,7 @@ Invoke-WebRequest https://github.com/czy-code-923/czy-code/releases/download/v0.
 ( set -eu; f=$(mktemp); trap 'rm -f "$f"' EXIT; curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/czy-code-923/czy-code/main/scripts/panel-access.py -o "$f"; python3 "$f" enable-autostart --env /opt/starhub-control/control.env )
 ```
 
-操作包括 Docker、归属校验通过的 PostgreSQL 容器重启策略、面板主服务、匹配的系统 Nginx，以及已安装的网关 / 更新助手 **timer**。宝塔 / 外部 Nginx 保留原监督方式；缺少助手会在 `missing_helpers` 列出，`complete=false`，不会假称已安装全部。不会开启临时恢复入口或改回普通网页的公网监听。其他 VPS 上的 Agent 由各自服务管理。
+操作包括 Docker、SQLite 状态目录、面板主服务、匹配的系统 Nginx，以及已安装的网关 / 更新助手 **timer**。宝塔 / 外部 Nginx 保留原监督方式；缺少助手会在 `missing_helpers` 列出，`complete=false`，不会假称已安装全部。不会开启临时恢复入口或改回普通网页的公网监听。其他 VPS 上的 Agent 由各自服务管理。
 
 ```bash
 systemctl is-enabled docker.service starhub-control.service starhub-gateway.timer starhub-panel-updater.timer
@@ -336,7 +336,7 @@ ssh -N -L 5173:127.0.0.1:5173 YOUR_USER@YOUR_VPS
 
 ## 手动构建与测试
 
-源码构建使用 Go **1.27.3+**、Node.js 22.12+、Python 3；原生控制面需要 PostgreSQL 17。构建完成后无需 Node 常驻。
+源码构建使用 Go **1.27.3+**、Node.js 22.12+、Python 3；控制面使用内置 SQLite，不需要单独部署数据库。构建完成后无需 Node 常驻。
 
 ```bash
 bash scripts/install.sh build
@@ -350,7 +350,7 @@ Windows 使用 `./scripts/install.ps1 -Mode build` 和 `./scripts/run-native.ps1
 ```bash
 go vet ./...
 # 集成测试只使用专用测试库，自动创建 / 清理隔离 schema
-export TEST_DATABASE_URL='postgres://TEST_USER:TEST_PASSWORD@127.0.0.1:5432/harbor_test?sslmode=disable'
+export TEST_DATABASE_URL='sqlite:///tmp/nodehub-test.db'
 go test -count=1 ./...
 python scripts/test_domain_sync.py
 python scripts/test_managed_gateway.py
@@ -404,7 +404,7 @@ Linux / Windows 通用命令见本文前部，更多布局见 [安装文档](doc
 
 ## 数据库内存
 
-内存上限不是预占内存。新安装和 Compose 默认 512 MiB，Compose 用 `POSTGRES_MEMORY_LIMIT`，新安装用 `quickstart.py --db-memory-mb 512` 调整。旧 Linux 安装的更新助手仅扩大过小上限：物理内存 ≥1.5 GiB 时为 512 MiB，≥768 MiB 时为 384 MiB，否则为 256 MiB；保持原有更大或不限额设置，不重启数据库、不清理数据、不自动调高连接数。设置 → 后台版本可查看最近回报的限制与主机内存。
+Compose 的 API / Web 内存限制只限制容器，不代表预占内存；SQLite 状态保存在 `nodehub-data` 持久卷。设置 → 后台版本可查看最近回报的限制与主机内存。
 
 需要更大容量时，在一键新装的 SSH 中以 root 执行（只允许扩大上限，不需要 sudo）：
 

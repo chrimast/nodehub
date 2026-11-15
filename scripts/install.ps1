@@ -20,5 +20,5 @@ if ($Mode -eq 'compose') {
     }
     Push-Location web
     try { Invoke-Checked npm @('ci'); Invoke-Checked npm @('run','build') } finally { Pop-Location }
-    Write-Host 'Built bin/ and web/dist/. See docs/INSTALL.md for PostgreSQL and native setup.'
+    Write-Host 'Built bin/ and web/dist/. SQLite state is stored privately by the control service.'
 }

@@ -1,0 +1,8 @@
+services:
+  api:
+    tmpfs:
+      - /tmp
+    volumes:
+      - nodehub-trial-data:/state
+volumes:
+  nodehub-trial-data:

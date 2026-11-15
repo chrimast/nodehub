@@ -22,18 +22,17 @@ def public_bind():
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--prefix',default=str(Path(os.environ.get('ProgramData','C:/ProgramData'))/'StarhubControl') if os.name=='nt' else '/opt/starhub-control')
-    parser.add_argument('--port',type=int,default=18080);parser.add_argument('--db-port',type=int,default=15432)
-    parser.add_argument('--db-memory-mb',type=int,default=512,help='PostgreSQL hard cap in MiB, 256-65536; actual use grows on demand')
+    parser.add_argument('--port',type=int,default=18080)
     parser.add_argument('--public',action='store_true',help='Explicitly allow authenticated web UI on all interfaces; HTTP has no transport encryption')
     parser.add_argument('--origin',help='Configured http(s)://IP:port or domain; DNS/TLS reverse proxy is configured separately')
     parser.add_argument('--foreground',action='store_true',help='Do not install service/task; suitable for OpenRC or supervised manual operation')
     args=parser.parse_args()
-    if not 256<=args.db_memory_mb<=65536:raise ValueError('Database memory cap must be 256-65536 MiB')
+
     from urllib.parse import urlsplit
     origin=(args.origin or 'http://'+(detected_ip() if args.public else '127.0.0.1')+':'+str(args.port)).rstrip('/')
     u=urlsplit(origin)
     if u.scheme not in ('http','https') or not u.hostname or u.username or u.path or u.query or u.fragment:raise ValueError('Invalid public origin')
-    if not 1024<=args.port<=65535 or args.port in (8080,8091,5173,args.db_port) or not 1024<=args.db_port<=65535:raise ValueError('Invalid external ports')
+    if not 1024<=args.port<=65535 or args.port in (8080,8091,5173):raise ValueError('Invalid external port')
     if os.name!='nt' and os.geteuid()!=0 and not args.foreground:raise ValueError('Service installation requires root; use sudo or --foreground')
     if os.name!='nt' and not args.foreground and not shutil.which('systemctl'):raise ValueError('systemd unavailable; use --foreground with your supervisor')
     if run('docker','info','--format','{{.OSType}}',capture_output=True,text=True).stdout.strip()!='linux':raise ValueError('A Linux-container Docker daemon is required')
@@ -47,11 +46,7 @@ def main():
     if os.name!='nt' and not args.foreground and Path('/etc/systemd/system/starhub-control.service').exists():raise ValueError('Existing systemd service refused')
     if os.name=='nt' and not args.foreground and subprocess.run(['schtasks','/Query','/TN','StarhubControl'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0:raise ValueError('Existing Windows task refused')
     if root.exists() or root.is_symlink():raise ValueError('Existing installation path refused; back up and follow the upgrade guide')
-    for port in (8080,8091,args.port,args.db_port):free(port)
-    container='starhub-control-db'
-    if subprocess.run(['docker','volume','inspect','starhub-control-pgdata'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0:raise ValueError('Existing database volume refused; follow the backup/upgrade guide')
-    existing=subprocess.run(['docker','container','inspect',container],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-    if existing.returncode==0:raise ValueError('Existing starhub-control-db container refused')
+    for port in (8080,8091,args.port):free(port)
     os.umask(0o077);root.mkdir(parents=True,mode=0o700)
     if os.name=='nt':
         identity=run('whoami',capture_output=True,text=True).stdout.strip()
@@ -69,15 +64,11 @@ def main():
     with zipfile.ZipFile(io.BytesIO(archive)) as z:
         if set(z.namelist())!={'manifest.json','linux-amd64.zip','linux-arm64.zip'}:raise ValueError('Unexpected Agent release archive')
         for name in z.namelist():(agent_dir/name).write_bytes(z.read(name));(agent_dir/name).chmod(0o644)
-    password=secrets.token_hex(24);admin=secrets.token_hex(32);master=secrets.token_hex(32)
-    pg=root/'postgres.env';pg.write_text('POSTGRES_DB=harbor\nPOSTGRES_USER=harbor\nPOSTGRES_PASSWORD='+password+'\n',encoding='utf-8');pg.chmod(0o600)
-    env={'ADMIN_TOKEN':admin,'MASTER_KEY':master,'DATABASE_URL':f'postgres://harbor:{password}@127.0.0.1:{args.db_port}/harbor?sslmode=disable','HTTP_ADDR':'127.0.0.1:8080','SHARE_ADDR':'127.0.0.1:8091','WEB_ADDR':(public_bind() if args.public else '127.0.0.1')+':'+str(args.port),'WEB_DIR':str(root/'web'),'PUBLIC_ORIGIN':origin,'AGENT_RELEASE_DIR':str(agent_dir),'GOMEMLIMIT':'128MiB','GOMAXPROCS':'1'}
+    admin=secrets.token_hex(32);master=secrets.token_hex(32)
+    state=root/'state';state.mkdir(mode=0o700)
+    env={'ADMIN_TOKEN':admin,'MASTER_KEY':master,'DATABASE_URL':'sqlite://'+str(state/'nodehub.db'),'HTTP_ADDR':'127.0.0.1:8080','SHARE_ADDR':'127.0.0.1:8091','WEB_ADDR':(public_bind() if args.public else '127.0.0.1')+':'+str(args.port),'WEB_DIR':str(root/'web'),'PUBLIC_ORIGIN':origin,'AGENT_RELEASE_DIR':str(agent_dir),'GOMEMLIMIT':'128MiB','GOMAXPROCS':'1'}
     private=root/'control.env';private.write_text(''.join(k+'='+v+'\n' for k,v in env.items()),encoding='utf-8');private.chmod(0o600)
-    run('docker','run','--detach','--name',container,'--restart','unless-stopped','--memory',str(args.db_memory_mb)+'m','--pids-limit','100','--publish',f'127.0.0.1:{args.db_port}:5432','--env-file',str(pg),'--volume','starhub-control-pgdata:/var/lib/postgresql/data','postgres:17-alpine','postgres','-c','shared_buffers=64MB','-c','max_connections=30','-c','work_mem=2MB',stdout=subprocess.DEVNULL)
-    for _ in range(60):
-        if subprocess.run(['docker','exec',container,'pg_isready','-U','harbor','-d','harbor'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0:break
-        time.sleep(1)
-    else:raise RuntimeError('PostgreSQL startup timed out; installation retained for diagnosis')
+
     print('Credentials saved privately in '+str(private)+'. Read ADMIN_TOKEN locally; never publish it.')
     if args.foreground:run(str(root/'bin'/('harbor-control'+extension)),env={**os.environ,**env});return
     if os.name=='nt':
@@ -110,7 +101,7 @@ def main():
                         import importlib.util
                         spec=importlib.util.spec_from_file_location('gateway_bootstrap',source/'scripts/install-gateway.py');gateway=importlib.util.module_from_spec(spec);spec.loader.exec_module(gateway)
                         gateway.install_gateway(private,source/'scripts',install_deps=True,enable_acme=True)
-                    print('Ready: '+origin+' (API and PostgreSQL remain loopback-only)');return
+                    print('Ready: '+origin+' (SQLite database remains private)');return
         except OSError:time.sleep(1)
     raise RuntimeError('Web health check timed out; inspect service/task. Data and credentials retained.')
 if __name__=='__main__':

@@ -310,7 +310,14 @@ func constraint(err error) error {
 func sqlitePath(url string) (string, error) {
 	switch {
 	case strings.HasPrefix(url, "sqlite://"):
-		return strings.TrimPrefix(url, "sqlite://"), nil
+		path := strings.TrimPrefix(url, "sqlite://")
+		if strings.HasPrefix(path, "//") {
+			path = "/" + strings.TrimPrefix(path, "//")
+		}
+		if path == "" {
+			return "", fmt.Errorf("unsupported DATABASE_URL (sqlite://path required)")
+		}
+		return path, nil
 	case strings.HasPrefix(url, "file:"):
 		return url, nil
 	case url == "" || url == "sqlite":

@@ -16,13 +16,13 @@ class RecoveryTests(unittest.TestCase):
     def test_address_query_does_not_print_credentials(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
-            env={'ADMIN_TOKEN':'secret-token-not-for-output-'*2,'WEB_DIR':str(root),'DATABASE_URL':'postgres://private','HTTP_ADDR':'127.0.0.1:8080','WEB_ADDR':'127.0.0.1:5173','PUBLIC_ORIGIN':'https://panel.example'}
+            env={'ADMIN_TOKEN':'secret-token-not-for-output-'*2,'WEB_DIR':str(root),'DATABASE_URL':'sqlite:///state/nodehub.db','HTTP_ADDR':'127.0.0.1:8080','WEB_ADDR':'127.0.0.1:5173','PUBLIC_ORIGIN':'https://panel.example'}
             with patch.object(p.urllib.request.OpenerDirector,'open',side_effect=OSError('offline')),patch.object(p,'UNIT',root/'absent'):
                 result=p.query(root,env)
             self.assertEqual(result['panel_url'],'https://panel.example')
             self.assertFalse(result['recovery']['active'])
             self.assertNotIn('secret-token',json.dumps(result))
-            self.assertNotIn('postgres://',json.dumps(result))
+            self.assertNotIn('sqlite://',json.dumps(result))
 
     def test_recovery_unit_ownership_is_enforced(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -40,12 +40,13 @@ class MaintenanceTests(unittest.TestCase):
     def setUp(self):
         directory=tempfile.TemporaryDirectory();self.addCleanup(directory.cleanup)
         self.root=Path(directory.name)/'starhub-control';self.root.mkdir();(self.root/'bin').mkdir();(self.root/'bin/harbor-control').write_bytes(b'fixture')
-        self.cfg=self.root/'control.env';self.original=b'ADMIN_TOKEN=private-token-sentinel-01234567890123456789\nMASTER_KEY=private-key-sentinel\nWEB_ADDR=[::]:18080\nDATABASE_URL=postgres://harbor:private-db-sentinel@127.0.0.1:15432/harbor\n'
+        self.original=b'ADMIN_TOKEN=private-token-sentinel-01234567890123456789\nMASTER_KEY=private-key-sentinel\nWEB_ADDR=[::]:18080\nDATABASE_URL=sqlite:///opt/starhub-control/state/nodehub.db\n'
+        self.cfg=self.root/'control.env'
         self.cfg.write_bytes(self.original);self.cfg.chmod(0o600)
         self.env=dict(line.split('=',1) for line in self.original.decode().splitlines())
         self.units=self.root/'units';self.units.mkdir();self.rescue=self.units/'starhub-panel-rescue.service'
         self.site={'domain':'panel.example.com','https':True};self.calls=[]
-        self.info=[{'Config':{'Image':'postgres:17-alpine','Env':['POSTGRES_USER=harbor','POSTGRES_DB=harbor','POSTGRES_PASSWORD=private-db-sentinel']},'HostConfig':{'PortBindings':{'5432/tcp':[{'HostIp':'127.0.0.1','HostPort':'15432'}]},'RestartPolicy':{'Name':'no'}},'Mounts':[{'Type':'volume','Name':'starhub-control-pgdata','Destination':'/var/lib/postgresql/data'}],'State':{'Running':False}}]
+        self.info=[]
         for patcher in (patch.object(p,'UNIT',self.rescue),patch.object(p,'UNIT_DIR',self.units),patch.object(p,'_trusted'),patch.object(p,'_local_json',side_effect=self.local),patch.object(p,'_probe_https'),patch.object(p,'_run',side_effect=self.run_command)):
             patcher.start();self.addCleanup(patcher.stop)
 
@@ -95,8 +96,8 @@ class MaintenanceTests(unittest.TestCase):
         self.assertEqual(p._installation(self.root,self.cfg),self.cfg)
 
     def test_public_or_foreign_database_is_refused_before_container_mutation(self):
-        self.info[0]['HostConfig']['PortBindings']['5432/tcp'][0]['HostIp']='0.0.0.0'
-        with self.assertRaisesRegex(ValueError,'loopback'):p.enable_autostart(self.root,self.env)
+        self.env['DATABASE_URL']='postgres://foreign/database'
+        with self.assertRaisesRegex(ValueError,'SQLite'):p.enable_autostart(self.root,self.env)
         self.assertFalse(any(a[:2] in (['docker','update'],['docker','start']) for a in self.calls))
 
     def test_autostart_checks_stopped_database_and_enables_only_owned_timers(self):
@@ -107,8 +108,6 @@ class MaintenanceTests(unittest.TestCase):
             (self.units/(name+'.timer')).write_text(marker+'[Timer]\nUnit='+name+'.service\n')
         result=p.enable_autostart(self.root,self.env)
         self.assertTrue(result['complete']);self.assertFalse(result['missing_helpers'])
-        self.assertIn(['docker','update','--restart','unless-stopped','starhub-control-db'],self.calls)
-        self.assertLess(self.calls.index(['docker','start','starhub-control-db']),self.calls.index(['systemctl','enable','--now','starhub-control.service']))
         enabled=[a[-1] for a in self.calls if a[:3]==['systemctl','enable','--now']]
         self.assertIn('starhub-gateway.timer',enabled);self.assertNotIn('starhub-gateway.service',enabled);self.assertNotIn('starhub-panel-rescue.service',enabled)
 
@@ -121,9 +120,6 @@ class MaintenanceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'ownership'):p.enable_autostart(self.root,self.env)
         self.assertFalse(self.calls)
 
-    def test_database_password_mismatch_is_refused(self):
-        self.info[0]['Config']['Env'][-1]='POSTGRES_PASSWORD=other-installation'
-        with self.assertRaisesRegex(ValueError,'ownership'):p._database_owner(self.env,self.info)
 
     def test_system_nginx_is_enabled_only_when_its_unit_matches(self):
         (self.root/'gateway.json').write_text(json.dumps({'owner':'starhub-gateway-v1','nginx':'/usr/sbin/nginx'}))
@@ -140,10 +136,6 @@ class MaintenanceTests(unittest.TestCase):
         self.assertEqual(result['nginx'],'external_or_unconfigured')
         self.assertFalse(any('nginx.service' in a for a in self.calls))
 
-    def test_existing_always_database_policy_is_preserved(self):
-        self.info[0]['HostConfig']['RestartPolicy']['Name']='always'
-        result=p.enable_autostart(self.root,self.env)
-        self.assertEqual(result['database_restart'],'always');self.assertFalse(any(a[:2]==['docker','update'] for a in self.calls))
 
     def test_public_internal_api_or_share_listener_blocks_startup(self):
         for key in ('HTTP_ADDR','SHARE_ADDR'):

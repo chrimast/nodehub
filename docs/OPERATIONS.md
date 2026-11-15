@@ -2,7 +2,7 @@
 
 启动：`docker compose up --build -d`；查看：`docker compose ps`、`docker compose logs api`。
 
-停止保留数据：`docker compose down`。重启后迁移幂等，资源、配置、任务和审计都从 PostgreSQL 恢复。Agent 无本地状态，未回报任务在过期后由同主机 Agent 重领。
+停止保留数据：`docker compose down`。重启后迁移幂等，资源、配置、任务和审计都从 SQLite 持久卷恢复。Agent 无本地状态，未回报任务在过期后由同主机 Agent 重领。
 
 Linux / macOS 备份：
 

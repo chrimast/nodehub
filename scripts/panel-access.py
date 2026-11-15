@@ -149,18 +149,15 @@ def _helper_timers(root):
         installed.append(timer.name)
     return installed,missing
 
-def _database_owner(env,info):
-    from urllib.parse import urlsplit,unquote
+def _database_owner(env,info=None):
+    from urllib.parse import urlsplit
     db=urlsplit(env.get('DATABASE_URL',''))
-    if db.scheme not in ('postgres','postgresql') or db.hostname not in ('127.0.0.1','localhost','::1') or db.username!='harbor' or db.path!='/harbor':raise ValueError('Expected the local project database')
-    if not isinstance(info,list) or len(info)!=1:raise ValueError('Unexpected database container identity')
-    row=info[0];config=row.get('Config',{});values=dict(v.split('=',1) for v in config.get('Env',[]) if '=' in v)
-    ports=row.get('HostConfig',{}).get('PortBindings',{}).get('5432/tcp',[])
-    mounts=row.get('Mounts',[])
-    if not config.get('Image','').startswith('postgres:') or values.get('POSTGRES_USER')!='harbor' or values.get('POSTGRES_DB')!='harbor' or values.get('POSTGRES_PASSWORD')!=unquote(db.password or ''):raise ValueError('Database container ownership mismatch')
-    if not ports or not all(p.get('HostIp') in ('127.0.0.1','::1') and int(p.get('HostPort',0))==(db.port or 5432) for p in ports):raise ValueError('Database must keep its verified loopback port')
-    if not any(m.get('Type')=='volume' and m.get('Name')=='starhub-control-pgdata' and m.get('Destination')=='/var/lib/postgresql/data' for m in mounts):raise ValueError('Unexpected database data volume')
-    return row
+    if db.scheme not in ('sqlite','file'):
+        raise ValueError('Expected the local SQLite database')
+    path=db.path or db.netloc
+    if not path or not Path(path).is_absolute():
+        raise ValueError('SQLite database must use an absolute private path')
+    return {'database':'sqlite','path':path}
 
 def _nginx_service(root):
     path=root/'gateway.json'
@@ -178,17 +175,12 @@ def enable_autostart(root,env):
     timers,missing=_helper_timers(root)
     nginx=_nginx_service(root)
     _run(['systemctl','enable','--now','docker.service'],capture_output=True)
-    result=_run(['docker','container','inspect','starhub-control-db'],capture_output=True)
-    row=_database_owner(env,json.loads(result.stdout))
-    policy=row.get('HostConfig',{}).get('RestartPolicy',{}).get('Name')
-    if policy not in ('unless-stopped','always'):
-        _run(['docker','update','--restart','unless-stopped','starhub-control-db'],capture_output=True);policy='unless-stopped'
-    if not row.get('State',{}).get('Running'):_run(['docker','start','starhub-control-db'],capture_output=True)
+    row=_database_owner(env)
     _run(['systemctl','enable','--now','starhub-control.service'],capture_output=True)
     _wait_control(env)
     if nginx:_run(['systemctl','enable','--now',nginx],capture_output=True)
     for timer in timers:_run(['systemctl','enable','--now',timer],capture_output=True)
-    return {'enabled':['docker.service','starhub-control.service']+([nginx] if nginx else [])+timers,'nginx':nginx or 'external_or_unconfigured','database':'starhub-control-db','database_restart':policy,'missing_helpers':missing,'complete':not missing,'note':'Systemd keeps installed panel services running after SSH disconnects. External Nginx/BaoTa stays with its existing supervisor. Missing helpers must be installed separately; oneshot services are triggered by timers.'}
+    return {'enabled':['docker.service','starhub-control.service']+([nginx] if nginx else [])+timers,'nginx':nginx or 'external_or_unconfigured','database':'sqlite','database_path':row['path'],'missing_helpers':missing,'complete':not missing,'note':'Systemd keeps the panel running after SSH disconnects. SQLite remains a private file; external Nginx/BaoTa stays with its existing supervisor.'}
 
 def env_file(explicit=None):
     candidates = [Path(explicit)] if explicit else ([Path(os.environ.get('ProgramData','C:/ProgramData'))/'StarhubControl/control.env'] if os.name=='nt' else [Path('/etc/harbor/control.env'),Path('/opt/starhub-control/control.env')])

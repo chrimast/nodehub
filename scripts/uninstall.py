@@ -1,8 +1,8 @@
 """Uninstall only this control plane. Preview by default; --apply executes.
 
-Database volumes, private environment files, certificates and backups survive by
-default. --purge-data explicitly destroys the selected installation's database
-volume and private state. It never removes Docker, PostgreSQL packages, Nginx,
+Private environment files, certificates and backups survive by default.
+--purge-data explicitly destroys the selected installation's SQLite state.
+It never removes Docker packages, Nginx,
 other sites, Let's Encrypt certificates, or Agents on other hosts.
 """
 import argparse,json,os,re,shutil,subprocess,sys,xml.etree.ElementTree as ET
@@ -54,21 +54,6 @@ def owned_units(root,layout):
         found.append(path)
     return found
 
-def database_container(name):
-    if not shutil.which('docker'):return None
-    p=subprocess.run(['docker','container','inspect',name],capture_output=True,text=True)
-    if p.returncode:
-        if 'No such' in p.stderr:return None
-        raise RuntimeError('Cannot inspect Docker; nothing was removed')
-    rows=json.loads(p.stdout)
-    if len(rows)!=1:raise ValueError('Unexpected database container identity')
-    item=rows[0];config=item['Config'];env=dict(v.split('=',1) for v in config.get('Env',[]) if '=' in v)
-    if not config.get('Image','').startswith('postgres:') or env.get('POSTGRES_USER')!='harbor' or env.get('POSTGRES_DB')!='harbor':
-        raise ValueError('Database container is not the expected project PostgreSQL')
-    mounts=[m for m in item.get('Mounts',[]) if m['Destination']=='/var/lib/postgresql/data']
-    if len(mounts)!=1 or mounts[0].get('Type')!='volume' or not re.fullmatch(r'(?:starhub-control-pgdata|harbor[-_][A-Za-z0-9_-]{1,80})',mounts[0].get('Name','')):
-        raise ValueError('Database mount is not a recognized named project volume; remove it manually after backup')
-    return {'name':name,'volume':mounts[0]['Name']}
 
 def plan(root,layout,purge,windows=False):
     if layout=='legacy' and (windows or root!=Path('/opt/harbor')):raise ValueError('Legacy installation root must be /opt/harbor on Linux')
@@ -122,18 +107,14 @@ def main():
     else:root=Path('/opt/harbor') if layout=='legacy' else Path(args.prefix).absolute() if args.prefix else default
     paths,roots=plan(root,layout,args.purge_data,windows)
     units=[] if windows else owned_units(root,layout)
-    db=database_container('starhub-control-db' if layout=='quickstart' else 'harbor-postgres')
+    db=None
     task=owned_windows_task(root) if windows else False
     retained=root/'uninstall-retained.json'
-    if not db and retained.is_file() and not retained.is_symlink():
-        if not shutil.which('docker'):raise RuntimeError('Docker is required to inspect or remove the retained project volume')
-        saved=json.loads(retained.read_text())
-        if saved.get('root')!=str(root) or not re.fullmatch(r'(?:starhub-control-pgdata|harbor[-_][A-Za-z0-9_-]{1,80})',saved.get('volume','')):raise ValueError('Retained database identity is invalid')
-        db={'name':saved['name'],'volume':saved['volume'],'retained':True}
+
     print('Installation:',root,'layout:',layout)
     print('Stop/remove project units or task:',', '.join(p.name for p in units) if not windows else 'StarhubControl (current-user task)')
     print('Remove project paths:',', '.join(str(p) for p in paths))
-    print('Database:',('remove container '+db['name']+'; '+('DESTROY volume ' if args.purge_data else 'KEEP volume ')+db['volume']) if db else 'external/unavailable container: preserved')
+    print('Database: SQLite file under '+str(root/'state')+(' will be destroyed' if args.purge_data else ' will be retained'))
     print('KEEP all backups, Nginx, other websites, Docker, firewall rules and OS packages.')
     print('Remote Agents are not contacted. Retire them in the panel before uninstalling the manager.')
     if layout=='legacy':print('Disable the panel domain reverse proxy in BaoTa separately; unrelated/shared Nginx configuration is not edited.')
@@ -151,14 +132,8 @@ def main():
         if units:run('systemctl','disable','--now',*[p.name for p in units])
         for path in units:path.unlink()
         if units:run('systemctl','daemon-reload')
-    if db:
-        if not args.purge_data:
-            with retained.open('w',encoding='utf-8') as stream:json.dump({'root':str(root),'name':db['name'],'volume':db['volume']},stream)
-            retained.chmod(0o600)
-        if not db.get('retained'):run('docker','container','rm','--force',db['name'],stdout=subprocess.DEVNULL)
-        if args.purge_data:run('docker','volume','rm',db['volume'],stdout=subprocess.DEVNULL)
     for path in paths:remove(path,roots)
-    print('Project runtime removed. '+(('Project private state and the identified database volume were destroyed.' if db else 'Project private state removed; external databases were preserved.') if args.purge_data else 'Private state and database volume retained for recovery.'))
+    print('Project runtime removed. '+('Project SQLite state was destroyed.' if args.purge_data else 'Private state and SQLite data were retained for recovery.'))
 
 if __name__=='__main__':
     try:main()

@@ -5,7 +5,7 @@ spec=importlib.util.spec_from_file_location('uninstall',Path(__file__).with_name
 
 class UninstallTests(unittest.TestCase):
     def fixture(self,root):
-        root.mkdir();(root/'control.env').write_text('ADMIN_TOKEN='+'x'*40+'\nDATABASE_URL=postgres://local/test\n')
+        root.mkdir();(root/'control.env').write_text('ADMIN_TOKEN='+'x'*40+'\nDATABASE_URL=sqlite:///state/nodehub.db\n')
         (root/'bin').mkdir();(root/'bin/harbor-control').write_text('test-binary')
         (root/'web').mkdir();(root/'web/index.html').write_text('test-web')
     def test_default_removes_runtime_but_preserves_private_state(self):
@@ -26,11 +26,8 @@ class UninstallTests(unittest.TestCase):
             root=Path(directory).resolve()/'unrelated';self.fixture(root)
             with self.assertRaises(ValueError):u.plan(root,'quickstart',False)
             self.assertTrue((root/'bin/harbor-control').exists())
-    def test_database_ownership_is_required(self):
-        row={'Config':{'Image':'postgres:17-alpine','Env':['POSTGRES_USER=other','POSTGRES_DB=other']},'Mounts':[{'Destination':'/var/lib/postgresql/data','Type':'volume','Name':'unrelated'}]}
-        fake=type('Result',(),{'returncode':0,'stdout':json.dumps([row]),'stderr':''})()
-        with patch.object(u.shutil,'which',return_value='docker'),patch.object(u.subprocess,'run',return_value=fake):
-            with self.assertRaises(ValueError):u.database_container('starhub-control-db')
+    def test_sqlite_state_is_not_an_external_database_container(self):
+        self.assertFalse(hasattr(u,'database_container'))
     def test_windows_task_must_target_selected_root(self):
         xml='<Task><Actions><Exec><Arguments>-File C:\\Other\\run.ps1</Arguments></Exec></Actions></Task>'
         fake=type('Result',(),{'returncode':0,'stdout':xml,'stderr':''})()
