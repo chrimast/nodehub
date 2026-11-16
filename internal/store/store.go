@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"vps-control/internal/authconfig"
 
 	_ "modernc.org/sqlite"
 )
@@ -45,6 +46,12 @@ func Open(ctx context.Context, raw string) (*DB, error) {
 	if _, err := sqlDB.ExecContext(ctx, sqliteSchema); err != nil {
 		sqlDB.Close()
 		return nil, fmt.Errorf("sqlite schema: %w", err)
+	}
+	initial, err := authconfig.HashPassword("admin")
+	if err != nil { sqlDB.Close(); return nil, err }
+	if _, err := sqlDB.ExecContext(ctx, `INSERT OR IGNORE INTO admin_credentials(tenant_id,password_hash,must_change) VALUES('self',$1,1)`, initial); err != nil {
+		sqlDB.Close()
+		return nil, err
 	}
 	if _, err := sqlDB.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version) VALUES('sqlite-nodehub')`); err != nil {
 		sqlDB.Close()

@@ -80,8 +80,9 @@ func (s *Server) protocolTemplates(w http.ResponseWriter, r *http.Request) error
 			t["port_hopping"] = false
 			t["note"] = "TUIC v5 is supported by sing-box with QUIC/UDP, TLS, UUID and password. Native Hysteria port hopping options are not part of this adapter."
 			t["transports"] = []string{"quic/udp"}
-			t["optional"] = []string{"congestion", "managed_users", "tuic_udp_relay_mode", "tuic_heartbeat_seconds"}
-			t["credential"] = "UUID and password"
+			t["optional"] = []string{"congestion", "managed_users", "tuic_udp_relay_mode", "tuic_heartbeat_seconds", "tuic_auth_timeout", "tuic_server_heartbeat_seconds"}
+			t["option_capabilities"] = map[string][]string{"sing-box": {"auth_timeout", "heartbeat"}}
+
 		}
 		if kind == "snell" {
 			t["optional"] = []string{"next_id", "snell_version", "snell_obfs", "snell_host", "snell_mode"}
@@ -96,7 +97,8 @@ func (s *Server) protocolTemplates(w http.ResponseWriter, r *http.Request) error
 			t["server_bandwidth"] = map[string]string{"up_mbps": "VPS to client; Brutal negotiation ceiling, 0 unset", "down_mbps": "client to VPS; Brutal negotiation ceiling, 0 unset"}
 			t["client_bandwidth_modes"] = []string{"bbr", "brutal", ""}
 			t["note"] = "Client-only bbr omits bandwidth hints; brutal uses measured client up/down Mbps independently. Empty mode preserves legacy exports. Server ceilings do not limit BBR. Full sing-box/Mihomo profiles carry client tuning."
-			t["optional"] = []string{"next_id", "managed_users", "hy2_obfs_password", "up_mbps", "down_mbps", "hy2_client_mode", "hy2_client_up_mbps", "hy2_client_down_mbps", "hy2_bbr_profile", "hop_ports", "hop_interval_seconds"}
+			t["optional"] = []string{"next_id", "managed_users", "hy2_obfs_password", "hy2_obfs_mode", "hy2_obfs_min_packet_size", "hy2_obfs_max_packet_size", "hy2_server_bbr_profile", "up_mbps", "down_mbps", "hy2_client_mode", "hy2_client_up_mbps", "hy2_client_down_mbps", "hy2_bbr_profile", "hop_ports", "hop_interval_seconds"}
+			t["option_capabilities"] = map[string][]string{"sing-box": {"gecko", "bbr_profile"}}
 			t["transports"] = []string{"quic/udp"}
 		}
 	}

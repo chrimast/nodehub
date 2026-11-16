@@ -8049,7 +8049,45 @@
           }
         }
       }
-    }
+    },
+    "/api/v1/admin/password": {
+      "post": {
+        "summary": "Change the administrator password",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "password"
+                ],
+                "properties": {
+                  "password": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 128
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password changed"
+          },
+          "400": {
+            "description": "Validation failure"
+          },
+          "401": {
+            "description": "Invalid administrator password"
+          }
+        },
+        "x-required-scopes": []
+      }
+    },
+    "/api/v1/reality-domain-scan": {"post":{"summary":"Discover TLS names on public IP prefix","description":"Probe HTTPS port 443 on up to 256 public addresses. Root administrator only; no port enumeration.","security":[{"AdminToken":[]}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["prefix"],"properties":{"prefix":{"type":"string","example":"8.8.8.0/29"}}}}}},"responses":{"200":{"description":"Discovered unique TLS certificate names"},"400":{"description":"Invalid, private, reserved, or oversized network prefix"},"401":{"description":"Unauthorized"},"403":{"description":"Forbidden"}}}}
   },
   "components": {
     "securitySchemes": {

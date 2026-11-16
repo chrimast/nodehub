@@ -37,6 +37,7 @@ func TestOpenAPIExplicitRouteCoverage(t *testing.T) {
 			t.Errorf("undocumented route: %s %s", m[1], m[2])
 		}
 	}
+	if _, ok := doc.Paths["/api/v1/reality-domain-scan"]["post"]; !ok { t.Error("REALITY same-IP domain scan must be documented") }
 }
 func TestProtocolTemplatesExposePerCoreLayers(t *testing.T) {
 	w := httptest.NewRecorder()

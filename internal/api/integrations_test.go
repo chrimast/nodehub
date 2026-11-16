@@ -244,6 +244,38 @@ func TestIntegrationPermissionsAndSubscriptions(t *testing.T) {
 	}
 }
 
+func TestCORSAllowsSameOriginBehindWebProxyAndRejectsForeignOrigin(t *testing.T) {
+	db := openTestDB(t)
+	handler := (&Server{DB: db, AdminToken: strings.Repeat("a", 32)}).Handler()
+	request := func(origin string) int {
+		r := httptest.NewRequest("OPTIONS", "/api/v1/admin/password", nil)
+		r.Header.Set("Origin", origin)
+		r.Header.Set("X-Forwarded-Host", "panel.example:18080")
+		r.Header.Set("X-Forwarded-Proto", "http")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		return w.Code
+	}
+	if got := request("http://panel.example:18080"); got != 204 { t.Fatalf("same origin status=%d", got) }
+	if got := request("http://evil.example"); got != 403 { t.Fatalf("foreign origin status=%d", got) }
+}
+
+func TestPasswordChangeCORSAndForcedChangeGate(t *testing.T) {
+	db := openTestDB(t)
+	s := &Server{DB: db, AdminToken: strings.Repeat("a", 32)}
+	h := s.Handler()
+	call := func(method,path,origin,body,credential string) *httptest.ResponseRecorder {
+		r:=httptest.NewRequest(method,path,strings.NewReader(body)); r.Header.Set("Authorization","Bearer "+credential); r.Header.Set("Origin",origin); r.Header.Set("X-Forwarded-Host","panel.example:18080"); r.Header.Set("X-Forwarded-Proto","http")
+		w:=httptest.NewRecorder(); h.ServeHTTP(w,r); return w
+	}
+	if w:=call("GET","/api/v1/session","http://panel.example:18080","","admin"); w.Code!=200 || !strings.Contains(w.Body.String(),`"must_change_password":true`) { t.Fatalf("initial session: %d %s",w.Code,w.Body.String()) }
+	if w:=call("GET","/api/v1/hosts","http://panel.example:18080","","admin"); w.Code!=403 { t.Fatalf("initial admin bypassed gate: %d",w.Code) }
+	if w:=call("POST","/api/v1/admin/password","http://panel.example:18080",`{"password":"long-enough-password"}`,"admin"); w.Code!=200 { t.Fatalf("change password: %d %s",w.Code,w.Body.String()) }
+	s.AdminToken = ""
+	if w:=call("GET","/api/v1/session","http://panel.example:18080","","long-enough-password"); w.Code!=200 || !strings.Contains(w.Body.String(),`"must_change_password":false`) { t.Fatalf("updated session: %d %s",w.Code,w.Body.String()) }
+	if w:=call("GET","/api/v1/hosts","http://evil.example","","long-enough-password"); w.Code!=403 { t.Fatalf("foreign origin allowed: %d",w.Code) }
+}
+
 func TestClientTemplateSafety(t *testing.T) {
 	for _, c := range []struct {
 		format, raw string

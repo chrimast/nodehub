@@ -22,6 +22,8 @@ patched-engines/
 
 agent-releases/*
 !agent-releases/.gitkeep
+ADMIN_TOKEN.txt
+试用登录.txt
 
 official-engines/
 .release-cache/

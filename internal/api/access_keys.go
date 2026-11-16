@@ -2,7 +2,9 @@ package api
 
 import (
 	"vps-control/internal/store"
+	"vps-control/internal/authconfig"
 	"context"
+
 	"encoding/json"
 	"net/http"
 	"regexp"
@@ -18,6 +20,8 @@ type apiIdentity struct {
 	Scopes  []string
 	Expires time.Time
 	Root    bool
+	MustChange bool
+	PasswordAuth bool
 }
 type identityContext struct{}
 type scopeInfo struct {
@@ -110,6 +114,8 @@ func requiredScopes(r *http.Request) []string {
 		return []string{"hosts" + mode}
 	case "live", "protocol-templates", "engine-catalog":
 		return []string{"nodes" + mode}
+	case "reality-domain-scan":
+		return nil
 	case "engine-releases":
 		return []string{"kernels:read"}
 	case "gateway":
@@ -178,9 +184,20 @@ func requiredScopes(r *http.Request) []string {
 func (s *Server) authenticateAPI(r *http.Request) (apiIdentity, error) {
 	header := r.Header.Get("Authorization")
 	if equal(header, "Bearer "+s.AdminToken) {
-		return apiIdentity{Root: true, ID: "admin"}, nil
+		var mustChange bool
+		if s.DB != nil { _ = s.DB.QueryRow(r.Context(), `SELECT must_change FROM admin_credentials WHERE tenant_id=$1`, tenant).Scan(&mustChange) }
+		return apiIdentity{Root: true, ID: "admin", MustChange: mustChange}, nil
 	}
 	token := strings.TrimPrefix(header, "Bearer ")
+	if s.DB != nil {
+		var stored string
+		var mustChange bool
+		if e := s.DB.QueryRow(r.Context(), `SELECT password_hash,must_change FROM admin_credentials WHERE tenant_id=$1`, tenant).Scan(&stored, &mustChange); e == nil {
+			if authconfig.VerifyPassword(token, stored) {
+				return apiIdentity{Root: true, ID: "admin", MustChange: mustChange, PasswordAuth: true}, nil
+			}
+		}
+	}
 	if !strings.HasPrefix(header, "Bearer ") || !keyPattern.MatchString(token) {
 		return apiIdentity{}, problem{401, "unauthorized"}
 	}
@@ -230,7 +247,18 @@ func (s *Server) authenticateAPI(r *http.Request) (apiIdentity, error) {
 
 func (s *Server) apiSession(w http.ResponseWriter, r *http.Request) error {
 	identity, _ := r.Context().Value(identityContext{}).(apiIdentity)
-	send(w, 200, map[string]any{"root": identity.Root, "key_id": identity.ID, "scopes": identity.Scopes, "expires_at": identity.Expires, "version": buildinfo.Version})
+	send(w, 200, map[string]any{"root": identity.Root, "key_id": identity.ID, "scopes": identity.Scopes, "expires_at": identity.Expires, "version": buildinfo.Version, "must_change_password": identity.MustChange})
+	return nil
+}
+
+func (s *Server) changeAdminPassword(w http.ResponseWriter, r *http.Request) error {
+	var b struct { Password string `json:"password"` }
+	if e := decode(w, r, &b); e != nil { return e }
+	if len([]byte(b.Password)) < 8 || len([]byte(b.Password)) > 128 || strings.TrimSpace(b.Password) != b.Password { return bad("password must contain 8-128 non-space bytes") }
+	h, e := authconfig.HashPassword(b.Password)
+	if e != nil { return e }
+	if _, e = s.DB.Exec(r.Context(), `UPDATE admin_credentials SET password_hash=$2,must_change=0,updated_at=now() WHERE tenant_id=$1`, tenant, h); e != nil { return e }
+	send(w, 200, map[string]bool{"changed": true})
 	return nil
 }
 func (s *Server) apiCapabilities(w http.ResponseWriter, r *http.Request) error {

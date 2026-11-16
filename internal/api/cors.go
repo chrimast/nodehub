@@ -10,6 +10,24 @@ import (
 	"vps-control/internal/live"
 )
 
+func requestOrigin(r *http.Request) string {
+	host := r.Host
+	if forwarded := r.Header.Get("X-Forwarded-Host"); forwarded != "" && !strings.Contains(forwarded, ",") { host = forwarded }
+	scheme := "http"
+	if r.TLS != nil { scheme = "https" }
+	if forwarded := r.Header.Get("X-Forwarded-Proto"); forwarded == "http" || forwarded == "https" { scheme = forwarded }
+	if host == "" || strings.ContainsAny(host, "\r\n/\\") { return "" }
+	return scheme + "://" + host
+}
+
+func sameRequestOrigin(r *http.Request, origin string) bool {
+	request := requestOrigin(r)
+	if request == "" { return false }
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") || u.Opaque != "" || (u.Scheme != "http" && u.Scheme != "https") { return false }
+	return strings.EqualFold(origin, request)
+}
+
 func normalizedAPIOrigin(value string) (string, bool) {
 	u, e := url.Parse(value)
 	if e != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") || u.Opaque != "" || !live.Address(u.Hostname()) {
@@ -31,7 +49,7 @@ func (s *Server) cors(next http.Handler) http.Handler {
 			return
 		}
 		normalized, valid := normalizedAPIOrigin(origin)
-		allowed := false
+		allowed := sameRequestOrigin(r, origin)
 		if origin != "" {
 			for _, share := range []bool{false, true} {
 				if configured, e := s.siteOrigin(r, share); e == nil && strings.EqualFold(configured, origin) {

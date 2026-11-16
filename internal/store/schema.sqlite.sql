@@ -6,6 +6,13 @@ PRAGMA busy_timeout=5000;
 
 CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')));
 
+CREATE TABLE IF NOT EXISTS admin_credentials (
+  tenant_id TEXT PRIMARY KEY,
+  password_hash TEXT NOT NULL,
+  must_change INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
 CREATE TABLE IF NOT EXISTS api_keys (
   tenant_id TEXT NOT NULL,
   id TEXT NOT NULL,

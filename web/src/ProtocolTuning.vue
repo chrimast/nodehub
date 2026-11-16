@@ -10,11 +10,14 @@ function bandwidthMode(){if(props.form.hy2_client_mode!=='brutal'){props.form.hy
  <div class="fields">
   <label>客户端带宽模式<select v-model="form.hy2_client_mode" aria-label="HY2 客户端带宽模式" @change="bandwidthMode"><option value="">保留旧版 · 与服务端共用数值</option><option value="bbr">BBR 自动估计（新建默认）</option><option value="brutal">Brutal · 手动填写实测带宽</option></select></label>
   <label>客户端 BBR 配置<select v-model="form.hy2_bbr_profile" aria-label="HY2 客户端 BBR 配置"><option value="">内核默认 standard</option><option value="standard">standard</option><option value="conservative">conservative</option><option value="aggressive">aggressive</option></select></label>
+  <label>sing-box 服务端 BBR profile<select v-model="form.hy2_server_bbr_profile" aria-label="HY2 服务端 BBR profile"><option value="">内核默认 standard</option><option value="standard">standard</option><option value="conservative">conservative</option><option value="aggressive">aggressive</option></select></label>
   <template v-if="form.hy2_client_mode==='brutal'"><label>客户端上传 Mbps<input v-model.number="form.hy2_client_up_mbps" type="number" required min="1" max="100000" aria-label="HY2 客户端上传 Mbps"><small>客户端 → VPS；填写正值。</small></label><label>客户端下载 Mbps<input v-model.number="form.hy2_client_down_mbps" type="number" required min="1" max="100000" aria-label="HY2 客户端下载 Mbps"><small>VPS → 客户端；两项都需填写正值。</small></label></template>
  </div>
  <p v-if="form.hy2_client_mode==='brutal'" class="form-note">按客户端到该 VPS 的实际可用带宽填写，移动网络建议先用自动模式。填低会限制速率，虚高可能增加丢包、延迟和流量消耗；两端不需要填写同一组数值。</p>
  <p v-if="!form.hy2_client_mode" class="form-note">此选项保留旧节点的下发行为，升级不会自动改动已有带宽。</p>
  <details><summary>服务端 · Brutal 协商上限与混淆</summary><div class="fields">
+  <label>sing-box 服务端混淆类型<select v-model="form.hy2_obfs_mode" aria-label="HY2 服务端混淆类型"><option value="">关闭</option><option value="salamander">Salamander</option><option value="gecko">Gecko（仅 sing-box 1.14+）</option></select></label>
+  <template v-if="form.hy2_obfs_mode==='gecko'"><label>Gecko 最小包长<input v-model.number="form.hy2_obfs_min_packet_size" type="number" min="1" max="1200" aria-label="HY2 Gecko 最小包长"></label><label>Gecko 最大包长<input v-model.number="form.hy2_obfs_max_packet_size" type="number" min="1" max="1200" aria-label="HY2 Gecko 最大包长"></label></template>
   <label>VPS 发出上限 up_mbps<input v-model.number="form.up_mbps" type="number" min="0" max="100000" aria-label="HY2 服务端发出 Mbps"><small>VPS → 客户端，0 不设置协商上限。</small></label>
   <label>VPS 接收上限 down_mbps<input v-model.number="form.down_mbps" type="number" min="0" max="100000" aria-label="HY2 服务端接收 Mbps"><small>客户端 → VPS，0 不设置协商上限。</small></label>
   <label>Salamander 混淆密码<input v-model="form.hy2_obfs_password" type="password" autocomplete="off" :placeholder="editing?'留空保留已有密码':'留空关闭混淆'"></label>
@@ -26,6 +29,8 @@ function bandwidthMode(){if(props.form.hy2_client_mode!=='brutal'){props.form.hy
  <label>两端拥塞控制<select v-model="form.congestion" aria-label="TUIC 拥塞控制"><option value="">内核默认 cubic</option><option>cubic</option><option>bbr</option><option>new_reno</option></select></label>
  <label>客户端 UDP 转发<select v-model="form.tuic_udp_relay_mode" aria-label="TUIC UDP 转发模式"><option value="">客户端默认 native</option><option value="native">native · QUIC 数据报</option><option value="quic">quic · QUIC 流</option></select></label>
  <label>客户端心跳（秒）<input v-model.number="form.tuic_heartbeat_seconds" type="number" min="0" max="300" aria-label="TUIC 心跳秒数"><small>0 保留客户端默认，通常为 10 秒。</small></label>
+ <label>服务端认证超时<select v-model="form.tuic_auth_timeout" aria-label="TUIC 服务端认证超时"><option value="">内核默认 3 秒</option><option value="5s">5 秒</option><option value="10s">10 秒</option><option value="30s">30 秒</option></select></label>
+ <label>服务端心跳（秒）<input v-model.number="form.tuic_server_heartbeat_seconds" type="number" min="0" max="300" aria-label="TUIC 服务端心跳秒数"><small>0 使用内核默认 10 秒。</small></label>
 </div><p class="muted">TUIC 没有 HY2 的 up_mbps / down_mbps 参数；心跳和转发方式不会自动提升线路带宽。QUIC + TLS / h3，保持原有 0-RTT 关闭策略。客户端专属值写入完整订阅。</p></fieldset>
 <fieldset v-if="form.kind==='anytls'" class="protocol-tuning"><legend>AnyTLS · 客户端会话复用</legend><div class="fields">
  <label>空闲检查间隔（秒）<input v-model.number="form.anytls_idle_check_seconds" type="number" min="0" max="3600" aria-label="AnyTLS 空闲检查间隔"></label>

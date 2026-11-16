@@ -102,6 +102,9 @@ func (s *Server) admin(f endpoint) http.HandlerFunc {
 		if e != nil {
 			return e
 		}
+		if identity.Root && identity.PasswordAuth && identity.MustChange && !(r.Method == http.MethodGet && r.URL.Path == "/api/v1/session") && !(r.Method == http.MethodPost && r.URL.Path == "/api/v1/admin/password") {
+			return problem{403, "administrator password change required"}
+		}
 		return f(w, r.WithContext(context.WithValue(r.Context(), identityContext{}, identity)))
 	})
 }
@@ -191,6 +194,8 @@ func (s *Server) Handler() http.Handler {
 		return s.shareExport(w, r)
 	}))
 	m.HandleFunc("GET /api/v1/session", s.admin(s.apiSession))
+	m.HandleFunc("POST /api/v1/admin/password", s.admin(s.changeAdminPassword))
+	m.HandleFunc("POST /api/v1/reality-domain-scan", s.admin(s.realityDomainScan))
 	m.HandleFunc("GET /api/v1/api-capabilities", s.admin(s.apiCapabilities))
 	m.HandleFunc("GET /api/v1/openapi", s.admin(s.openapi))
 	m.HandleFunc("GET /api/v1/api-keys", s.admin(s.keys))

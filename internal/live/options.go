@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ProtocolOptions are a bounded, versioned subset of native engine options.
@@ -30,6 +31,16 @@ type ProtocolOptions struct {
 	HysteriaObfs      string `json:"hysteria_obfs_password,omitempty"`
 	UpMbps            int    `json:"up_mbps,omitempty"`
 	DownMbps          int    `json:"down_mbps,omitempty"`
+	HY2ObfsMode       string `json:"hy2_obfs_mode,omitempty"`
+	HY2ObfsMinPacket  int    `json:"hy2_obfs_min_packet_size,omitempty"`
+	HY2ObfsMaxPacket  int    `json:"hy2_obfs_max_packet_size,omitempty"`
+	HY2ServerBBRProfile string `json:"hy2_server_bbr_profile,omitempty"`
+	TUICAuthTimeout   string `json:"tuic_auth_timeout,omitempty"`
+	TUICHeartbeatSec  int    `json:"tuic_server_heartbeat_seconds,omitempty"`
+	TCPFastOpen       bool   `json:"tcp_fast_open,omitempty"`
+	TCPMultiPath      bool   `json:"tcp_multi_path,omitempty"`
+	TCPKeepAlive      string `json:"tcp_keep_alive,omitempty"`
+	TLSHandshakeTimeout string `json:"tls_handshake_timeout,omitempty"`
 }
 
 func (s Spec) snellVersion() int {
@@ -60,6 +71,7 @@ func OptionsCapable(version string) bool {
 	return major > 0 || minor >= 9
 }
 func (s Spec) validateOptions() error {
+	if err := s.validateLatestOptions(); err != nil { return err }
 	if err := s.validateClientTuning(); err != nil {
 		return err
 	}
@@ -116,6 +128,24 @@ func (s Spec) validateOptions() error {
 	}
 	return nil
 }
+func (s Spec) validateLatestOptions() error {
+	o:=s.ProtocolOptions
+	if s.Engine == "xray" && (o.HY2ObfsMode!=""||o.HY2ObfsMinPacket!=0||o.HY2ObfsMaxPacket!=0||o.HY2ServerBBRProfile!=""||o.TUICAuthTimeout!=""||o.TUICHeartbeatSec!=0||o.TCPFastOpen||o.TCPMultiPath||o.TCPKeepAlive!=""||o.TLSHandshakeTimeout!="") { return errors.New("latest native options in this group require sing-box") }
+	if s.Kind!="hysteria2"&&(o.HY2ObfsMode!=""||o.HY2ObfsMinPacket!=0||o.HY2ObfsMaxPacket!=0||o.HY2ServerBBRProfile!="") { return errors.New("HY2 server options require Hysteria2") }
+	if o.HY2ObfsMode!=""&&o.HY2ObfsMode!="salamander"&&o.HY2ObfsMode!="gecko" { return errors.New("HY2 obfuscation must be salamander or gecko") }
+	if o.HY2ObfsMode=="salamander"&&s.HY2Obfs==""||o.HY2ObfsMode=="gecko"&&s.HY2Obfs!="" { return errors.New("HY2 obfuscation mode and password do not match") }
+	if o.HY2ObfsMode=="gecko"&&(o.HY2ObfsMinPacket<1||o.HY2ObfsMinPacket>1200||o.HY2ObfsMaxPacket<o.HY2ObfsMinPacket||o.HY2ObfsMaxPacket>1200) { return errors.New("Gecko packet size must be 1-1200 and min must not exceed max") }
+	if o.HY2ObfsMode!="gecko"&&(o.HY2ObfsMinPacket!=0||o.HY2ObfsMaxPacket!=0) { return errors.New("HY2 packet size options require Gecko obfuscation") }
+	if o.HY2ServerBBRProfile!=""&&o.HY2ServerBBRProfile!="conservative"&&o.HY2ServerBBRProfile!="standard"&&o.HY2ServerBBRProfile!="aggressive" { return errors.New("unsupported HY2 BBR profile") }
+	if s.Kind!="tuic"&&(o.TUICAuthTimeout!=""||o.TUICHeartbeatSec!=0) { return errors.New("TUIC server options require TUIC") }
+	if o.TUICAuthTimeout!="" { d,e:=time.ParseDuration(o.TUICAuthTimeout);if e!=nil||d<time.Second||d>time.Minute{return errors.New("TUIC auth timeout must be 1s-1m")} }
+	if o.TUICHeartbeatSec<0||o.TUICHeartbeatSec>300{return errors.New("TUIC heartbeat must be 0-300 seconds")}
+	if s.Transport=="quic"&&(o.TCPFastOpen||o.TCPMultiPath||o.TCPKeepAlive!=""){return errors.New("TCP listener options cannot be used with QUIC transport")}
+	if o.TCPKeepAlive!=""{d,e:=time.ParseDuration(o.TCPKeepAlive);if e!=nil||d<time.Second||d>24*time.Hour{return errors.New("TCP keepalive must be 1s-24h")}}
+	if o.TLSHandshakeTimeout!=""{d,e:=time.ParseDuration(o.TLSHandshakeTimeout);if e!=nil||d<time.Second||d>time.Minute{return errors.New("TLS handshake timeout must be 1s-1m")}}
+	return nil
+}
+
 func (s Spec) SSMethod() string {
 	if s.Cipher != "" {
 		return s.Cipher
