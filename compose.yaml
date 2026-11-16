@@ -12,7 +12,6 @@ services:
       AGENT_RELEASE_DIR: /app/agent-releases
     volumes:
       - nodehub-data:/state
-      - ./agent-releases:/app/agent-releases:ro
     mem_limit: 192m
     pids_limit: 64
     ports: ["127.0.0.1:8080:8080", "127.0.0.1:18091:8091"]

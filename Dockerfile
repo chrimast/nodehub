@@ -8,5 +8,6 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/control ./cmd/control && CGO_ENABLE
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates wget && addgroup -S app && adduser -S app -G app && mkdir /state && chown app:app /state
 COPY --from=build /out/ /app/
+COPY agent-releases/ /app/agent-releases/
 USER app
 ENTRYPOINT ["/app/control"]
