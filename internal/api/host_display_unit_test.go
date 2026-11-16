@@ -29,14 +29,14 @@ func TestHostDisplayUnitPersistsWithoutRebilling(t *testing.T) {
 	in.InitialUsed = nil
 	version := int(state["version"].(float64))
 	in.Version = &version
-	in.DisplayUnit = "GiB"
+	in.DisplayUnit = "GB"
 	h.call("PUT", path, in, 200, nil)
-	check("GiB")
+	check("GB")
 	h.call("PUT", path, in, 409, nil)
 	version = int(state["version"].(float64))
 	in.DisplayUnit = "MiB"
 	h.call("PUT", path, in, 400, nil)
-	check("GiB")
+	check("GB")
 	// Old API consumers omit the new preference and must not reset it.
 	in.DisplayUnit = "GB"
 	h.call("PUT", path, in, 200, nil)
@@ -46,7 +46,7 @@ func TestHostDisplayUnitPersistsWithoutRebilling(t *testing.T) {
 	h.call("PUT", path, in, 200, nil)
 	check("GB")
 	legacy := obj018(h.call("POST", "hosts", map[string]any{"name": "legacy consumer"}, 201, nil))
-	if got := obj018(h.call("GET", "hosts/"+legacy["id"].(string)+"/traffic", nil, 200, nil))["display_unit"]; got != "GiB" {
+	if got := obj018(h.call("GET", "hosts/"+legacy["id"].(string)+"/traffic", nil, 200, nil))["display_unit"]; got != "GB" {
 		t.Fatal("legacy display default changed", got)
 	}
 }

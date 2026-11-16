@@ -46,7 +46,7 @@ func TestEnrollmentIntegration(t *testing.T) {
 	}
 	h := want("POST", "hosts", map[string]string{"name": "NAT host"}, 201)
 	id := h["id"].(string)
-	want("PUT", "site", map[string]any{"domain": "vps.example.com", "https": true}, 200)
+	want("PUT", "site", map[string]any{"domain": "vps.example.com", "https": true, "agent_origins": []string{"https://vps.example.com"}}, 200)
 	path := "hosts/" + id + "/enrollment"
 	if code, _ := call("POST", path, nil, false); code != 401 {
 		t.Fatal("unauthenticated enrollment")

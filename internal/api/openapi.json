@@ -9746,10 +9746,9 @@
           "display_unit": {
             "type": "string",
             "enum": [
-              "GB",
-              "GiB"
+              "GB"
             ],
-            "description": "Persisted host display preference. GB = 10^9 B; GiB = 2^30 B. Does not change quota_bytes or the byte ledger. Omit to preserve the current preference; new records default to GiB."
+            "description": "Persisted host display preference. GB = 10^9 B. Does not change quota_bytes or the byte ledger. Omit to preserve the current preference; new records default to GB."
           }
         }
       },
@@ -9805,10 +9804,9 @@
           "display_unit": {
             "type": "string",
             "enum": [
-              "GB",
-              "GiB"
+              "GB"
             ],
-            "description": "Persisted host display preference. GB = 10^9 B; GiB = 2^30 B. Does not change quota_bytes or the byte ledger. Omit to preserve the current preference; new records default to GiB."
+            "description": "Persisted host display preference. GB = 10^9 B. Does not change quota_bytes or the byte ledger. Omit to preserve the current preference; new records default to GB."
           }
         }
       },
@@ -9923,11 +9921,11 @@
             "type": "string",
             "enum": [
               "GB",
-              "GiB",
+              "GB",
               "auto"
             ],
             "default": "GB",
-            "description": "Display only. GB=10^9 bytes, GiB=2^30 bytes. auto scales decimal B/KB/MB/GB/TB/PB. Raw byte quotas and counters remain unchanged. Host allowance tables retain each host display_unit."
+            "description": "Display only. GB=10^9 bytes; auto scales decimal B/KB/MB/GB/TB/PB. Raw byte quotas and counters remain unchanged. Host allowance tables use GB."
           }
         }
       }

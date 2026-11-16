@@ -1,12 +1,12 @@
 import {inject,ref,type InjectionKey,type Ref} from 'vue'
 
-export type TrafficUnit='GB'|'GiB'|'auto'
+export type TrafficUnit='GB'|'auto'
 export const trafficUnitKey:InjectionKey<Ref<TrafficUnit>>=Symbol('traffic-unit')
-export const normalizeTrafficUnit=(v:unknown):TrafficUnit=>v==='GiB'||v==='auto'?v:'GB'
-export const quotaUnitSize=(unit:string)=>unit==='GiB'?1073741824:1e9
-export function quotaDraft(bytes:unknown,unit:unknown){const quota_unit=unit==='GiB'?'GiB':'GB',source=Number(bytes??0),amount=source/quotaUnitSize(quota_unit);return {quota_unit,quota_amount:amount,quota_amount_source:amount,quota_bytes_source:source}}
+export const normalizeTrafficUnit=(v:unknown):TrafficUnit=>v==='auto'?'auto':'GB'
+export const quotaUnitSize=(_unit?:string)=>1e9
+export function quotaDraft(bytes:unknown,_unit:unknown){const quota_unit='GB',source=Number(bytes??0),amount=source/1e9;return {quota_unit,quota_amount:amount,quota_amount_source:amount,quota_bytes_source:source}}
 export function quotaToBytes(d:Record<string,any>){return Number(d.quota_amount)===d.quota_amount_source?d.quota_bytes_source:Math.round(Number(d.quota_amount??0)*quotaUnitSize(d.quota_unit))}
-export function changeQuotaUnit(d:Record<string,any>,unit:string){Object.assign(d,quotaDraft(quotaToBytes(d),unit))}
+export function changeQuotaUnit(d:Record<string,any>,_unit:string){Object.assign(d,quotaDraft(quotaToBytes(d),'GB'))}
 export function trafficBytes(value:unknown,unit:TrafficUnit='GB'){
  const parsed=Number(value??0),n=Number.isFinite(parsed)?Math.max(0,parsed):0
  if(unit==='auto'){

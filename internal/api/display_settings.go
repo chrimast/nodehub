@@ -29,8 +29,8 @@ func (s *Server) displaySettings(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(w, r, &in); err != nil {
 		return err
 	}
-	if in.Unit != "GB" && in.Unit != "GiB" && in.Unit != "auto" {
-		return bad("traffic_unit must be GB, GiB or auto")
+	if in.Unit != "GB" && in.Unit != "auto" {
+		return bad("traffic_unit must be GB or auto")
 	}
 	tx, err := s.DB.Begin(r.Context())
 	if err != nil {
@@ -52,9 +52,7 @@ func (s *Server) displaySettings(w http.ResponseWriter, r *http.Request) error {
 
 func trafficBytes(n int64, unit string) string {
 	size := float64(1e9)
-	if unit == "GiB" {
-		size = 1 << 30
-	}
+
 	if unit == "auto" {
 		size = 1
 		for _, item := range []struct {
@@ -81,7 +79,7 @@ func (s *Server) trafficSummary(ctx context.Context, command string) (string, er
 	}
 	query := `SELECT name,used_bytes,quota_bytes,multiplier_milli,billing_mode FROM proxy_users WHERE tenant_id=$1 ORDER BY name LIMIT 30`
 	if command == "hosts" {
-		query = `SELECT h.name,COALESCE(t.used_bytes,0),COALESCE(t.quota_bytes,0),COALESCE(t.display_unit,'GiB'),COALESCE(h.last_seen>now()-interval '90 seconds',false),COALESCE(t.last_sample_at>now()-interval '35 seconds',false) FROM hosts h LEFT JOIN host_traffic t ON(t.tenant_id,t.host_id)=(h.tenant_id,h.id) WHERE h.tenant_id=$1 AND h.deleted_at IS NULL ORDER BY h.name LIMIT 30`
+		query = `SELECT h.name,COALESCE(t.used_bytes,0),COALESCE(t.quota_bytes,0),'GB',COALESCE(h.last_seen>now()-interval '90 seconds',false),COALESCE(t.last_sample_at>now()-interval '35 seconds',false) FROM hosts h LEFT JOIN host_traffic t ON(t.tenant_id,t.host_id)=(h.tenant_id,h.id) WHERE h.tenant_id=$1 AND h.deleted_at IS NULL ORDER BY h.name LIMIT 30`
 	}
 	rows, err := s.DB.Query(ctx, query, tenant)
 	if err != nil {

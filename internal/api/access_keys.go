@@ -252,9 +252,10 @@ func (s *Server) apiSession(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) changeAdminPassword(w http.ResponseWriter, r *http.Request) error {
-	var b struct { Password string `json:"password"` }
+	var b struct { Password string `json:"password"`; ConfirmPassword string `json:"confirm_password"` }
 	if e := decode(w, r, &b); e != nil { return e }
 	if len([]byte(b.Password)) < 8 || len([]byte(b.Password)) > 128 || strings.TrimSpace(b.Password) != b.Password { return bad("password must contain 8-128 non-space bytes") }
+	if b.Password != b.ConfirmPassword { return bad("password confirmation does not match") }
 	h, e := authconfig.HashPassword(b.Password)
 	if e != nil { return e }
 	if _, e = s.DB.Exec(r.Context(), `UPDATE admin_credentials SET password_hash=$2,must_change=0,updated_at=now() WHERE tenant_id=$1`, tenant, h); e != nil { return e }

@@ -19,7 +19,7 @@ func TestTrafficDisplaySettingsArePersistedAndDoNotChangeAccounting(t *testing.T
 	if got := obj018(h.call("GET", "display-settings", nil, 200, nil))["traffic_unit"]; got != "GB" {
 		t.Fatal(got)
 	}
-	for _, unit := range []string{"GiB", "auto", "GB"} {
+	for _, unit := range []string{"auto", "GB"} {
 		h.call("PUT", "display-settings", map[string]any{"traffic_unit": unit}, 200, nil)
 		if got := obj018(h.call("GET", "display-settings", nil, 200, nil))["traffic_unit"]; got != unit {
 			t.Fatal("preference not persisted", got)
@@ -48,7 +48,7 @@ func TestTrafficUnitsDoNotMixDecimalAndBinary(t *testing.T) {
 	for _, item := range []struct {
 		n          int64
 		unit, want string
-	}{{500_000_000_000, "GB", "500.00 GB"}, {1 << 30, "GiB", "1.00 GiB"}, {1 << 30, "GB", "1.07 GB"}, {1 << 20, "GB", "0.001048576 GB"}, {0, "GB", "0.00 GB"}, {2048, "auto", "2.05 KB"}, {2_000_000_000_000, "auto", "2.00 TB"}} {
+	}{{500_000_000_000, "GB", "500.00 GB"}, {1 << 30, "GB", "1.07 GB"}, {1 << 20, "GB", "0.001048576 GB"}, {0, "GB", "0.00 GB"}, {2048, "auto", "2.05 KB"}, {2_000_000_000_000, "auto", "2.00 TB"}} {
 		if got := trafficBytes(item.n, item.unit); got != item.want {
 			t.Errorf("%d %s got %q want %q", item.n, item.unit, got, item.want)
 		}

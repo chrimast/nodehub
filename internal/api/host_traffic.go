@@ -50,8 +50,8 @@ func saveHostTraffic(ctx context.Context, tx store.Tx, id string, in hostTraffic
 	if !fresh && in.InitialUsed != nil {
 		return bad("use the calibration endpoint for an existing host")
 	}
-	if in.DisplayUnit != "" && in.DisplayUnit != "GB" && in.DisplayUnit != "GiB" {
-		return bad("host display_unit must be GB or GiB")
+	if in.DisplayUnit != "" && in.DisplayUnit != "GB" {
+		return bad("host display_unit must be GB")
 	}
 	if in.Quota < 0 || in.Quota > 9000000000000000 || !slices.Contains([]string{"both", "rx", "tx", "max"}, in.Mode) || in.ResetDay < 1 || in.ResetDay > 31 || len(in.Interfaces) > 16 {
 		return bad("invalid host quota, accounting mode, reset day or interfaces")

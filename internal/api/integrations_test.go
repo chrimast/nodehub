@@ -270,7 +270,8 @@ func TestPasswordChangeCORSAndForcedChangeGate(t *testing.T) {
 	}
 	if w:=call("GET","/api/v1/session","http://panel.example:18080","","admin"); w.Code!=200 || !strings.Contains(w.Body.String(),`"must_change_password":true`) { t.Fatalf("initial session: %d %s",w.Code,w.Body.String()) }
 	if w:=call("GET","/api/v1/hosts","http://panel.example:18080","","admin"); w.Code!=403 { t.Fatalf("initial admin bypassed gate: %d",w.Code) }
-	if w:=call("POST","/api/v1/admin/password","http://panel.example:18080",`{"password":"long-enough-password"}`,"admin"); w.Code!=200 { t.Fatalf("change password: %d %s",w.Code,w.Body.String()) }
+	if w:=call("POST","/api/v1/admin/password","http://panel.example:18080",`{"password":"long-enough-password","confirm_password":"wrong-confirmation"}`,"admin"); w.Code!=400 { t.Fatalf("mismatched password confirmation accepted: %d %s",w.Code,w.Body.String()) }
+	if w:=call("POST","/api/v1/admin/password","http://panel.example:18080",`{"password":"long-enough-password","confirm_password":"long-enough-password"}`,"admin"); w.Code!=200 { t.Fatalf("change password: %d %s",w.Code,w.Body.String()) }
 	s.AdminToken = ""
 	if w:=call("GET","/api/v1/session","http://panel.example:18080","","long-enough-password"); w.Code!=200 || !strings.Contains(w.Body.String(),`"must_change_password":false`) { t.Fatalf("updated session: %d %s",w.Code,w.Body.String()) }
 	if w:=call("GET","/api/v1/hosts","http://evil.example","","long-enough-password"); w.Code!=403 { t.Fatalf("foreign origin allowed: %d",w.Code) }

@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS tenants (
   name TEXT NOT NULL,
   traffic_display_unit TEXT NOT NULL DEFAULT 'GB',
   PRIMARY KEY (id),
-  CHECK ((traffic_display_unit IN ('GB', 'GiB', 'auto')))
+  CHECK ((traffic_display_unit IN ('GB', 'auto')))
 );
 
 CREATE TABLE IF NOT EXISTS user_create_requests (
@@ -658,7 +658,7 @@ CREATE TABLE IF NOT EXISTS host_traffic (
   rx_rate INTEGER NOT NULL DEFAULT 0,
   tx_rate INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-  display_unit TEXT NOT NULL DEFAULT 'GiB',
+  display_unit TEXT NOT NULL DEFAULT 'GB',
   PRIMARY KEY (tenant_id, host_id),
   FOREIGN KEY (tenant_id, host_id) REFERENCES hosts(tenant_id, id) ON DELETE CASCADE,
   CHECK (((quota_bytes >= 0) AND (quota_bytes <= '9000000000000000'))),
@@ -667,7 +667,7 @@ CREATE TABLE IF NOT EXISTS host_traffic (
   CHECK ((period_rx >= 0)),
   CHECK ((period_tx >= 0)),
   CHECK (((adjustment_bytes >= 0) AND (adjustment_bytes <= '9000000000000000'))),
-  CHECK ((display_unit IN ('GB', 'GiB')))
+  CHECK ((display_unit = 'GB'))
 );
 
 CREATE TABLE IF NOT EXISTS live_services (

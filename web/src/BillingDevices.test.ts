@@ -7,16 +7,16 @@ import Devices from './DeviceManager.vue'
 import Logs from './AccessLog.vue'
 let wrappers:VueWrapper[]=[]
 afterEach(()=>{for(const w of wrappers)w.unmount();wrappers=[];vi.useRealTimers();vi.restoreAllMocks();vi.unstubAllGlobals()})
-it('preserves quota bytes when switching GB/GiB and sends the host period configuration',async()=>{
+it('preserves quota bytes when switching GB/GB and sends the host period configuration',async()=>{
  const stats={version:1,quota_bytes:1073741824,used_bytes:200,remaining_bytes:1073741624,mode:'both',reset_day:1,auto_reset:true,interfaces:[],fresh:true,interfaces_available:[]}
  const api=vi.fn(async(_p:string,m='GET')=>m==='GET'?stats:{saved:true});const w=mount(HostTraffic,{props:{host:{id:'h',name:'VPS'},api}});wrappers.push(w);await flushPromises()
  await w.get('[aria-label="主机流量额度"]').setValue(3);await w.find('.host-billing-fields select').setValue('GB');expect((w.get('[aria-label="主机流量额度"]').element as HTMLInputElement).checkValidity()).toBe(true);await w.get('[aria-label="主机计费方式"]').setValue('max');await w.find('form').trigger('submit');await flushPromises()
  expect(api).toHaveBeenCalledWith('hosts/h/traffic','PUT',expect.objectContaining({quota_bytes:3221225472,display_unit:'GB',mode:'max',version:1,reset_day:1}));expect(w.text()).toContain('套餐实时剩余')
 })
-it('shows each host in its saved unit without promoting GB or GiB to TB',async()=>{
- const hosts=[{id:'decimal',name:'GB provider',traffic:{display_unit:'GB',quota_bytes:500e9,used_bytes:50e9,remaining_bytes:450e9}},{id:'binary',name:'GiB provider',traffic:{display_unit:'GiB',quota_bytes:2048*1073741824,used_bytes:256*1073741824,remaining_bytes:1792*1073741824}}]
+it('shows each host in its saved unit without promoting GB or GB to TB',async()=>{
+ const hosts=[{id:'decimal',name:'GB provider',traffic:{display_unit:'GB',quota_bytes:500e9,used_bytes:50e9,remaining_bytes:450e9}},{id:'binary',name:'GB provider',traffic:{display_unit:'GB',quota_bytes:2048*1073741824,used_bytes:256*1073741824,remaining_bytes:1792*1073741824}}]
  const w=mount(Hosts,{props:{hosts,api:vi.fn()}});wrappers.push(w)
- const cards=w.findAll('.server-card');expect(cards[0]!.text()).toContain('450.00 GB');expect(cards[0]!.text()).toContain('已用 50.00 GB / 500.00 GB');expect(cards[1]!.text()).toContain('1792.00 GiB');expect(cards[1]!.text()).toContain('已用 256.00 GiB / 2048.00 GiB');expect(w.text()).not.toContain('TiB')
+ const cards=w.findAll('.server-card');expect(cards[0]!.text()).toContain('450.00 GB');expect(cards[0]!.text()).toContain('已用 50.00 GB / 500.00 GB');expect(cards[1]!.text()).toContain('1792.00 GB');expect(cards[1]!.text()).toContain('已用 256.00 GB / 2048.00 GB');expect(w.text()).not.toContain('TiB')
  await cards[0]!.findAll('button').find(b=>b.text()==='编辑')!.trigger('click')
  expect(w.get('[aria-label="主机流量单位"]').element).toHaveProperty('value','GB');expect(w.get('[aria-label="主机流量额度"]').element).toHaveProperty('value','500')
 })

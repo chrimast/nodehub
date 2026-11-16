@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"encoding/json"
 	"net/http"
 	"net/netip"
@@ -870,7 +871,19 @@ func (s *Server) liveSync(w http.ResponseWriter, r *http.Request, host string) e
 	}
 	return nil
 }
-func (s *Server) managementOrigin(r *http.Request) (string, error) { return s.siteOrigin(r, false) }
+func (s *Server) managementOrigin(r *http.Request) (string, error) {
+	origin, err := s.siteOrigin(r, false)
+	if errors.Is(err, store.ErrNoRows) {
+		// A freshly initialized database may not have site_settings yet. The
+		// browser-visible origin is still a validated, same-control-plane
+		// fallback for enrollment; saving site settings remains optional.
+		origin = requestOrigin(r)
+		if live.Origin(origin) {
+			return origin, nil
+		}
+	}
+	return origin, err
+}
 func (s *Server) publicOrigin(r *http.Request) (string, error)     { return s.siteOrigin(r, true) }
 func (s *Server) siteOrigin(r *http.Request, share bool) (string, error) {
 	return s.siteOriginFrom(s.DB, r.Context(), share)
