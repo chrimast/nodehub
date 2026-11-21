@@ -12,8 +12,11 @@ def main():
     if not re.fullmatch('[a-f0-9]{64}',ticket):raise ValueError('Invalid enrollment ticket')
     arch={'x86_64':'amd64','amd64':'amd64','aarch64':'arm64','arm64':'arm64'}.get(platform.machine().lower())
     if not arch:raise ValueError('Supported CPU architectures: amd64 and arm64')
-    unit=Path('/etc/systemd/system/harbor-agent.service');root=Path('/opt/harbor-agent');env=Path('/etc/harbor-agent/agent.env')
-    if unit.exists() or root.exists() or env.exists() or Path('/etc/harbor-agent-cleanup.json').exists():raise ExistingAgentFound('Existing Agent found; this command is only for a new installation.')
+    unit=Path('/etc/systemd/system/nodehub-agent.service');legacy_unit=Path('/etc/systemd/system/harbor-agent.service');root=Path('/opt/harbor-agent');env=Path('/etc/harbor-agent/agent.env')
+    if any(p.exists() or p.is_symlink() for p in (unit,legacy_unit,root,env,Path('/etc/harbor/agent.env'),Path('/etc/harbor-agent-cleanup.json'))):raise ExistingAgentFound('Existing Agent found; this command is only for a new installation.')
+    for name in ('nodehub-agent.service','harbor-agent.service'):
+        state=subprocess.run(['systemctl','show','--property=LoadState','--value',name],stdout=subprocess.PIPE,text=True,timeout=10).stdout.strip()
+        if state!='not-found':raise ExistingAgentFound('Existing Agent or unavailable systemd; refusing a new installation ('+name+').')
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self,*args):raise ValueError('Unexpected redirect refused')
     opener=urllib.request.build_opener(NoRedirect())
@@ -57,7 +60,7 @@ def main():
         for name,prefix in [('sing-box','SING_BOX'),('frps','FRPS'),('frpc','FRPC'),('xray','XRAY')]:values[prefix+'_BINARY']=str(root/name);values[prefix+'_SHA256']=hashlib.sha256((root/name).read_bytes()).hexdigest()
         env.write_text(''.join(k+'='+v+'\n' for k,v in values.items()));env.chmod(0o600)
         with unit.open('x') as unit_file:unit_file.write('''[Unit]
-Description=Harbor outbound Agent
+Description=NodeHub outbound Agent
 After=network-online.target
 Wants=network-online.target
 [Service]
@@ -89,16 +92,16 @@ WantedBy=multi-user.target
         Path('/etc/systemd/system/harbor-agent-cleanup.timer').write_text('[Unit]\nDescription=Starhub local uninstall marker check\n[Timer]\nOnBootSec=30\nOnUnitActiveSec=15\n[Install]\nWantedBy=timers.target\n')
         run('systemctl','daemon-reload');run('systemctl','enable','--now','harbor-agent-cleanup.timer')
         print('3/4 Starting the unprivileged Agent service...',flush=True)
-        run('systemctl','daemon-reload');run('systemctl','enable','--now','harbor-agent.service')
-        time.sleep(2);run('systemctl','is-active','--quiet','harbor-agent.service')
+        run('systemctl','daemon-reload');run('systemctl','enable','--now','nodehub-agent.service')
+        time.sleep(2);run('systemctl','is-active','--quiet','nodehub-agent.service')
         rollback['complete']=True
         print('4/4 Agent started. Return to the panel to confirm its heartbeat. No inbound management port was opened.')
 
 def rollback_install():
     if not rollback['complete']:
         if rollback['unit']:
-            subprocess.run(['systemctl','disable','--now','harbor-agent.service'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-            Path('/etc/systemd/system/harbor-agent.service').unlink(missing_ok=True)
+            subprocess.run(['systemctl','disable','--now','nodehub-agent.service'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+            Path('/etc/systemd/system/nodehub-agent.service').unlink(missing_ok=True)
             subprocess.run(['systemctl','disable','--now','harbor-agent-cleanup.timer'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             for file in ['/etc/systemd/system/harbor-agent-cleanup.timer','/etc/systemd/system/harbor-agent-cleanup.service','/usr/local/libexec/harbor-agent-cleanup','/etc/harbor-agent-cleanup.json']:Path(file).unlink(missing_ok=True)
         for directory in reversed(rollback['dirs']):shutil.rmtree(directory)

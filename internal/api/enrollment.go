@@ -1,13 +1,12 @@
 package api
 
 import (
-	"vps-control/internal/store"
 	"bytes"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
-		"io"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,6 +15,8 @@ import (
 	"sync"
 	"time"
 	"vps-control/internal/buildinfo"
+	"vps-control/internal/controlorigin"
+	"vps-control/internal/store"
 )
 
 //go:embed bootstrap/*.py bootstrap/*.sh
@@ -273,17 +274,18 @@ func (s *Server) agentRepairCommand(w http.ResponseWriter, r *http.Request) erro
 	if e := s.DB.QueryRow(r.Context(), `SELECT id FROM hosts WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL AND retire_state=''`, tenant, r.PathValue("id")).Scan(&id); e != nil {
 		return e
 	}
-	origins, e := s.agentOrigins(r)
+	origin, e := s.repairOrigin(r)
 	if e != nil {
 		return e
 	}
-	if len(origins) == 0 {
-		return bad("请先配置 HTTPS 管理地址或 Agent 控制地址")
+	curlOptions := "--proto '=https' --tlsv1.2"
+	insecure := strings.HasPrefix(origin, "http://")
+	if insecure {
+		curlOptions = "--proto '=http'"
 	}
 	source := bootstrapSource("repair.py")
 	source = bytes.ReplaceAll(source, []byte("\r\n"), []byte("\n"))
 	sum := sha256.Sum256(source)
-	origin := origins[0]
 	extra := ""
 	if r.URL.Query().Get("upgrade") == "1" {
 		extra = " --upgrade-agent"
@@ -291,13 +293,60 @@ func (s *Server) agentRepairCommand(w http.ResponseWriter, r *http.Request) erro
 	if r.URL.Query().Get("hopping") == "1" {
 		extra = " --upgrade-agent --enable-port-hopping"
 	}
-	command := "(S=; if [ \"$(id -u)\" != 0 ]; then S=sudo; fi; f=$(mktemp) && curl --proto '=https' --tlsv1.2 -fsS '" + origin + "/api/v1/agent/repair.py' -o \"$f\" && printf '%s  %s\\n' '" + hex.EncodeToString(sum[:]) + "' \"$f\" | sha256sum -c - && $S python3 \"$f\" '" + origin + "'" + extra + "; rc=$?; rm -f \"$f\"; exit $rc)"
+	if insecure {
+		upgrading := extra != ""
+		extra += " --allow-insecure-http"
+		if upgrading {
+			// Pin the release in the copied command, independently of the download response.
+			for _, arch := range []string{"amd64", "arm64"} {
+				pkg, _, err := s.release("linux-" + arch)
+				if err != nil {
+					return err
+				}
+				extra += " --package-" + arch + "=" + pkg.SHA256
+			}
+		}
+	}
+	command := "(S=; if [ \"$(id -u)\" != 0 ]; then S=sudo; fi; f=$(mktemp) && curl " + curlOptions + " -fsS '" + origin + "/api/v1/agent/repair.py' -o \"$f\" && printf '%s  %s\\n' '" + hex.EncodeToString(sum[:]) + "' \"$f\" | sha256sum -c - && $S python3 \"$f\" '" + origin + "'" + extra + "; rc=$?; rm -f \"$f\"; exit $rc)"
 	send(w, 200, map[string]string{"command": command, "origin": origin})
 	return nil
+}
+
+func (s *Server) repairOrigin(r *http.Request) (string, error) {
+	origins, e := s.configuredAgentOrigins(r)
+	if e != nil {
+		return "", e
+	}
+	for _, candidate := range origins {
+		if origin, e := controlorigin.Normalize(candidate, false); e == nil {
+			return origin, nil
+		}
+	}
+	configured, siteErr := s.siteOrigin(r, false)
+	if siteErr == nil {
+		if origin, e := controlorigin.Normalize(configured, false); e == nil {
+			return origin, nil
+		}
+	} else if _, invalid := siteErr.(problem); !invalid && siteErr != store.ErrNoRows {
+		return "", siteErr
+	}
+
+	if r.URL.Query().Get("allow_insecure_http") == "1" {
+		for _, candidate := range append(origins, configured) {
+			if origin, err := controlorigin.Normalize(candidate, true); err == nil {
+				return origin, nil
+			}
+		}
+
+	}
+	// Heartbeats can advertise any address; they do not authorize it to serve
+	// executable Agent releases or request an identity proof.
+	return "", bad("请先在系统设置登记 HTTPS 控制地址；仅在可信网络使用已登记的 HTTP 地址，并勾选允许 HTTP。")
 }
 
 func bootstrapSource(name string) []byte {
 	b, _ := bootstrapFiles.ReadFile("bootstrap/" + name)
 	b = bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))
-	return bytes.ReplaceAll(b, []byte("__PANEL_VERSION__"), []byte(buildinfo.Version))
+	b = bytes.ReplaceAll(b, []byte("__PANEL_VERSION__"), []byte(buildinfo.Version))
+	return bytes.ReplaceAll(b, []byte("__AGENT_VERSION__"), []byte(buildinfo.AgentVersion))
 }

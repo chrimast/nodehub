@@ -7,13 +7,56 @@ import Subscriptions from './Subscriptions.vue'
 import Hosts from './Hosts.vue'
 let w:VueWrapper
 const response=(data:any,status=200)=>({ok:status===200,status,json:async()=>data})
-beforeEach(()=>{localStorage.clear();vi.stubGlobal('fetch',vi.fn(async()=>response([])))})
+beforeEach(()=>{localStorage.clear();sessionStorage.clear();vi.stubGlobal('fetch',vi.fn(async()=>response([])))})
 afterEach(()=>{w?.unmount();vi.useRealTimers();vi.unstubAllGlobals();vi.restoreAllMocks()})
+it('marks the active navigation item and keeps icon navigation operable',async()=>{w=mount(Console);await login();expect(w.get('.console-home').attributes('aria-current')).toBe('page');const hosts=w.findAll('nav button').find(b=>b.text().includes('服务器节点'))!;expect(hosts.find('svg[aria-hidden=true]').exists()).toBe(true);await hosts.trigger('click');expect(hosts.attributes('aria-current')).toBe('page');expect(w.get('.console-home').attributes('aria-current')).toBeUndefined();expect(w.get('h1').text()).toBe('服务器节点');expect(sessionStorage.getItem('nodehub-page')).toBe('hosts')})
 it('defaults to the light theme with the current preference key',()=>{w=mount(Console);expect(w.attributes('data-theme')).toBe('light');expect(localStorage.getItem('nodehub-theme')).toBeNull()})
 it('requires matching new password confirmation on first login',async()=>{const api=vi.fn(async(_p:string,m='GET',body?:any)=>m==='POST'?{changed:true}:_p==='session'?{must_change_password:true}:[]);w=mount(Console,{global:{mocks:{}}});vi.mocked(fetch).mockImplementation(async(input:any,init:any)=>{const path=String(input);const body=init?.body?JSON.parse(init.body):{};return new Response(JSON.stringify(path.includes('/session')?{must_change_password:true}:path.includes('/admin/password')?(body.password===body.confirm_password?{changed:true}:{error:'password confirmation does not match'}):[]),{status:200,headers:{'Content-Type':'application/json'}})});await flushPromises();await w.get('input[type=password]').setValue('fixture-only-token');await w.get('form').trigger('submit');await flushPromises();const fields=w.findAll('input[type=password]');expect(fields).toHaveLength(2);await fields[0]!.setValue('correct-horse-battery');await fields[1]!.setValue('different-password');expect((w.find('button.primary').element as HTMLButtonElement).disabled).toBe(true);expect(w.text()).toContain('两次输入的密码不一致');await fields[1]!.setValue('correct-horse-battery');expect((w.find('button.primary').element as HTMLButtonElement).disabled).toBe(false);w.unmount()})
 async function login(){await w.get('input[type=password]').setValue('fixture-only-token');await w.get('form').trigger('submit');await flushPromises()}
+it('authenticates password changes with the entered password and updates the current session only on success',async()=>{
+ const fetchMock=vi.mocked(fetch)
+ fetchMock.mockImplementation(async(input:RequestInfo|URL,init?:RequestInit)=>{
+  if(String(input)!=='/api/v1/admin/password')return response(String(input).endsWith('/hosts')?[]:{}) as Response
+  return (new Headers(init?.headers).get('Authorization')==='Bearer fixture-only-token'
+   ?response({changed:true}):response({error:'unauthorized'},401)) as Response
+ })
+ w=mount(Console);await login()
+ await w.get('.sidebar-bottom button').trigger('click')
+ await vi.dynamicImportSettled();await flushPromises()
+ await w.findAll('.subnav button').find((b:{text:()=>string})=>b.text()==='修改密码')!.trigger('click')
+ const [current,password,confirmation]=w.findAll('input[type=password]')
+ await current!.setValue('wrong-fixture');await password!.setValue('new-fixture');await confirmation!.setValue('new-fixture')
+ await w.get('form').trigger('submit');await flushPromises()
+ expect(w.get('[role=alert]').text()).toBe('当前密码验证失败')
+ expect(sessionStorage.getItem('nodehub-admin-token')).toBe('fixture-only-token')
+ await current!.setValue('fixture-only-token');await w.get('form').trigger('submit');await flushPromises()
+ expect(fetchMock).toHaveBeenLastCalledWith('/api/v1/admin/password',expect.objectContaining({method:'POST',body:JSON.stringify({password:'new-fixture',confirm_password:'new-fixture'})}))
+ expect(sessionStorage.getItem('nodehub-admin-token')).toBe('new-fixture')
+ expect(w.get('[role=status]').text()).toBe('密码已修改')
+})
 it('keeps the login across reloads in the current tab only',async()=>{w=mount(Console);await login();expect(sessionStorage.getItem('nodehub-admin-token')).toBe('fixture-only-token');expect(localStorage.getItem('nodehub-admin-token')).toBeNull();w.unmount();w=mount(Console);await flushPromises();expect(w.find('aside').exists()).toBe(true)})
 it('keeps the session after a transient 401 from a poll',async()=>{vi.useFakeTimers();w=mount(Console);await login();vi.mocked(fetch).mockImplementationOnce(async()=>response({error:'temporary unauthorized'},401) as Response);await vi.advanceTimersByTimeAsync(30000);await flushPromises();expect(w.find('aside').exists()).toBe(true);expect(sessionStorage.getItem('nodehub-admin-token')).toBe('fixture-only-token')})
+it('recovers the host list after its first load fails following login', async () => {
+ vi.useFakeTimers()
+ let hostRequests = 0
+ vi.mocked(fetch).mockImplementation(async input => {
+  if (String(input) !== '/api/v1/hosts') {
+   return response(String(input).endsWith('/session') ? {} : []) as Response
+  }
+  hostRequests++
+  if (hostRequests === 1) return response({error:'主机列表暂时不可用'}, 503) as Response
+  return response([{id:'h',name:'恢复后的测试主机',address:'192.0.2.1'}]) as Response
+ })
+ w = mount(Console)
+ await login()
+ await w.findAll('nav button').find(b => b.text().includes('服务器节点'))!.trigger('click')
+ expect(w.get('.console-content > [role=alert]').text()).toContain('主机列表暂时不可用')
+ await vi.advanceTimersByTimeAsync(30000)
+ await flushPromises()
+ expect(hostRequests).toBe(2)
+ expect(w.find('.console-content > [role=alert]').exists()).toBe(false)
+ expect(w.text()).toContain('恢复后的测试主机')
+})
 it('discards delayed host data after logout',async()=>{vi.useFakeTimers();w=mount(Console);await login();let resolve!:(v:any)=>void;vi.mocked(fetch).mockImplementationOnce(()=>new Promise(r=>resolve=r));await vi.advanceTimersByTimeAsync(30000);await w.findAll('button').find(b=>b.text()==='退出登录')!.trigger('click');resolve(response([{id:'stale',name:'stale host'}]));await flushPromises();expect(w.find('aside').exists()).toBe(false);expect(w.text()).not.toContain('stale host')})
 it('shows failed login feedback',async()=>{vi.mocked(fetch).mockResolvedValue(response({error:'unauthorized'},401) as any);w=mount(Console);await login();expect(w.get('[role=alert]').text()).toContain('unauthorized')})
 it('assigns group permissions inside a user edit without manual credentials',async()=>{const api=vi.fn(async(p:string,m='GET')=>m==='GET'?(p==='proxy-users'?[{id:'u',name:'Alice',group_ids:['g'],enabled:true,expires_at:'2027-01-01T00:00:00Z',active:true}]:p==='user-groups'?[{id:'g',name:'Friends',service_ids:['s'],user_ids:['u']}]:[]):{});w=mount(Access,{props:{api}});await flushPromises();await w.findAll('button').find(b=>b.text()==='编辑权限')!.trigger('click');await w.get('input[maxlength="100"]').setValue('Alice renamed');await w.get('form').trigger('submit');await flushPromises();expect(api).toHaveBeenCalledWith('proxy-users/u','PUT',expect.objectContaining({name:'Alice renamed',group_ids:['g'],enabled:true}));expect(w.find('[role=dialog]').exists()).toBe(false)})

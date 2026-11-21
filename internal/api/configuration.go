@@ -1,11 +1,11 @@
 package api
 
 import (
-	"vps-control/internal/store"
 	"encoding/json"
 	"net/http"
 	"strings"
 	"vps-control/internal/live"
+	"vps-control/internal/store"
 )
 
 func (s *Server) checkChain(r *http.Request, tx store.Tx, id, nextID string) error {
@@ -72,7 +72,7 @@ func redactLive(value any) any {
 	case map[string]any:
 		for k, x := range v {
 			switch strings.ToLower(k) {
-			case "password", "uuid", "id", "psk", "key", "token", "privatekey", "private_key", "user_key", "userkey", "hy2_obfs_password", "hysteria_obfs_password", "auth_str", "auth", "proxy":
+			case "password", "uuid", "id", "psk", "key", "token", "privatekey", "private_key", "user_key", "userkey", "hy2_obfs_password", "hysteria_obfs_password", "auth_str", "auth-str", "obfs-password", "obfs-passwords", "auth", "proxy", "encryption", "decryption":
 				v[k] = "[已隐藏]"
 			default:
 				v[k] = redactLive(x)
@@ -111,6 +111,8 @@ func (s *Server) liveDetail(w http.ResponseWriter, r *http.Request) error {
 	spec.Password = ""
 	spec.UUID = ""
 	spec.PrivateKey = ""
+	encryptionEnabled := spec.Encryption != ""
+	spec.Encryption, spec.Decryption = "", ""
 	spec.Reality = spec.PublicReality()
 	if spec.Peer != nil {
 		spec.Peer.Password = ""
@@ -119,8 +121,9 @@ func (s *Server) liveDetail(w http.ResponseWriter, r *http.Request) error {
 		spec.Outbound.Password = ""
 		spec.Outbound.UUID = ""
 		spec.Outbound.StripServerSecrets()
+		spec.Outbound.Encryption = ""
 	}
-	send(w, 200, map[string]any{"id": r.PathValue("id"), "name": name, "host_id": host, "node_id": node, "certificate_id": cert, "next_id": next, "parent_id": parent, "version": version, "spec": spec, "engine": engine, "rendered": redactLive(preview)})
+	send(w, 200, map[string]any{"id": r.PathValue("id"), "name": name, "host_id": host, "node_id": node, "certificate_id": cert, "next_id": next, "parent_id": parent, "version": version, "spec": spec, "vless_encryption": encryptionEnabled, "engine": engine, "rendered": redactLive(preview)})
 	return nil
 }
 func (s *Server) liveUpdate(w http.ResponseWriter, r *http.Request) error {
@@ -263,6 +266,9 @@ func (s *Server) liveUpdate(w http.ResponseWriter, r *http.Request) error {
 	if e = tx.QueryRow(r.Context(), "SELECT agent_version FROM hosts WHERE tenant_id=$1 AND id=$2 FOR UPDATE", tenant, host).Scan(&av); e != nil {
 		return e
 	}
+	if e = requireVLESSAgent(r, tx, host, spec); e != nil {
+		return e
+	}
 	if e = requireHopping(r, tx, host, spec); e != nil {
 		return e
 	}
@@ -307,6 +313,10 @@ func (s *Server) liveUpdate(w http.ResponseWriter, r *http.Request) error {
 		if e = rows.Scan(&data, &parentVersion); e != nil {
 			rows.Close()
 			return e
+		}
+		if spec.Encryption != "" && !encryptionCapable(parentVersion) {
+			rows.Close()
+			return problem{409, "请先升级引用此节点的 Agent 至 0.25.7 或以上"}
 		}
 		if spec.NeedsTunedClientAgent() && !live.ClientTuningCapable(parentVersion) {
 			rows.Close()

@@ -1,13 +1,13 @@
 package api
 
 import (
-	"vps-control/internal/store"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"vps-control/internal/clientpolicy"
 	"vps-control/internal/live"
+	"vps-control/internal/store"
 )
 
 type clientInfo struct {
@@ -42,8 +42,15 @@ var clients = []clientInfo{
 
 func clientByID(id string) (clientInfo, bool) {
 	id = strings.ToLower(strings.TrimSpace(id))
-	if id == "clash" || id == "clash-meta" || id == "clashverge" || id == "clash-verge-rev" || id == "flclash" {
+	switch id {
+	case "clash", "clash-meta", "flclash":
 		id = "mihomo"
+	case "clashverge", "clash-verge-rev":
+		id = "clash-verge"
+	case "naive":
+		id = "naive-proxy"
+	case "mihomo-nodes":
+		id = "nekobox"
 	}
 	if id == "shadowracket" || id == "shadownracket" || id == "shadowrocket-uri" {
 		id = "shadowrocket"
@@ -114,15 +121,34 @@ func (s *Server) policies(w http.ResponseWriter, r *http.Request) error {
 	if b.Name == "" || len([]rune(b.Name)) > 100 {
 		return bad("请输入策略名称，最多 100 字")
 	}
+	b.Client = strings.ToLower(strings.TrimSpace(b.Client))
 	if b.Client == "" {
 		b.Client = "all"
 	}
-	if _, ok := clientByID(b.Client); !ok && b.Client != "all" {
-		return bad("未知客户端")
+	if b.Client != "all" {
+		client, ok := clientByID(b.Client)
+		if !ok || !client.Full {
+			return bad("请选择支持分流配置的客户端")
+		}
+		b.Client = client.ID
 	}
 	policy, e := clientpolicy.Parse(b.Source)
 	if e != nil {
 		return bad(e.Error())
+	}
+	if client, ok := clientByID(b.Client); ok && (client.Format == "xray" || client.Format == "sing-box") {
+		for _, group := range policy.Groups {
+			if group.Type == "fallback" || group.Type == "load-balance" {
+				return bad(fmt.Sprintf("%s 的策略组 %s 不支持 %s，请使用 select 或 url-test", client.Name, group.Name, group.Type))
+			}
+		}
+		if client.Format == "xray" {
+			for i, rule := range policy.Rules {
+				if strings.HasPrefix(rule, "PROCESS-NAME,") || strings.HasPrefix(rule, "PROCESS-PATH,") {
+					return bad(fmt.Sprintf("Xray 不支持第 %d 条进程匹配规则", i+1))
+				}
+			}
+		}
 	}
 	if len(b.Native) > 4 {
 		return bad("原生覆盖只支持 mihomo/sing-box/xray/shadowrocket-config")
@@ -270,7 +296,14 @@ func (s *Server) parsePolicy(w http.ResponseWriter, r *http.Request) error {
 func (s *Server) selectedPolicy(r *http.Request, user, client string) (*clientpolicy.Policy, map[string]string, map[string]json.RawMessage, string, error) {
 	var source, id string
 	var bindingsRaw, nativeRaw []byte
-	e := s.DB.QueryRow(r.Context(), `SELECT id,source,bindings,native_options FROM client_policies WHERE tenant_id=$1 AND (user_id=$2 OR user_id IS NULL) AND client_id IN ($3,'all') ORDER BY (user_id IS NOT NULL) DESC,(client_id=$3) DESC LIMIT 1`, tenant, user, client).Scan(&id, &source, &bindingsRaw, &nativeRaw)
+	fallback := client
+	switch client {
+	case "clash-verge":
+		fallback = "mihomo"
+	case "sfa", "sing-box-latest":
+		fallback = "sing-box"
+	}
+	e := s.DB.QueryRow(r.Context(), `SELECT id,source,bindings,native_options FROM client_policies WHERE tenant_id=$1 AND (user_id=$2 OR user_id IS NULL) AND client_id IN ($3,$4,'all') ORDER BY (user_id IS NOT NULL) DESC,(client_id=$3) DESC,(client_id=$4) DESC LIMIT 1`, tenant, user, client, fallback).Scan(&id, &source, &bindingsRaw, &nativeRaw)
 	if e == store.ErrNoRows {
 		return nil, nil, nil, "", nil
 	}
@@ -313,16 +346,21 @@ func policyFamily(address string) string {
 	return clientpolicy.AddressFamily(address)
 }
 func selectedClient(r *http.Request, profile string) (clientInfo, error) {
-	id := r.URL.Query().Get("client")
+	id := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("client")))
 	if id == "auto" {
 		id = ""
 	}
 	if id == "" {
-		id = r.URL.Query().Get("format")
+		id = strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+		if id == "auto" {
+			id = ""
+		}
 	}
 	if id == "" {
 		ua := strings.ToLower(r.UserAgent())
 		switch {
+		case strings.Contains(ua, "clash-verge") || strings.Contains(ua, "clash verge") || strings.Contains(ua, "clashverge"):
+			id = "clash-verge"
 		case strings.Contains(ua, "clash") || strings.Contains(ua, "mihomo"):
 			id = "mihomo"
 		case strings.Contains(ua, "v2rayng"):
@@ -341,8 +379,13 @@ func selectedClient(r *http.Request, profile string) (clientInfo, error) {
 			id = "nekobox"
 		case strings.Contains(ua, "stash"):
 			id = "stash"
-		case strings.Contains(ua, "sing-box") || strings.Contains(ua, "singbox") || strings.HasPrefix(ua, "sfa/") || strings.HasPrefix(ua, "sfi/"):
+		case strings.HasPrefix(ua, "sfa/") || strings.HasPrefix(ua, "sfi/"):
+			id = "sfa"
+		case strings.Contains(ua, "sing-box") || strings.Contains(ua, "singbox"):
 			id = "sing-box"
+			if modernSingBox(r, clientInfo{ID: id}) {
+				id = "sing-box-latest"
+			}
 		case strings.Contains(ua, "v2rayn"):
 			id = "v2rayn"
 		}

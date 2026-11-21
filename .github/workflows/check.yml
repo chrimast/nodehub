@@ -31,8 +31,6 @@ jobs:
       - run: python3 scripts/test_bootstrap_installers.py
       - run: go vet ./...
       - run: go test -race -count=1 -v ./...
-        env:
-          TEST_DATABASE_URL: sqlite:///tmp/nodehub-ci.db
       - name: Validate nft syntax in an isolated network namespace
         run: |
           sudo apt-get update -qq

@@ -1,16 +1,15 @@
 package api
 
 import (
-	"vps-control/internal/store"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"slices"
-	"strings"
 	"vps-control/internal/clientpolicy"
 	"vps-control/internal/live"
+	"vps-control/internal/store"
 )
 
 const legacyDefaultSourceSHA = "5bac8a5edb37b4e89c4a4406c82efb8f3099e429d4d43c0ad7ff438ef2defbfc"
@@ -191,15 +190,16 @@ func (s *Server) previewPolicy(w http.ResponseWriter, r *http.Request) error {
 		if e = json.Unmarshal(raw, &spec); e != nil {
 			return e
 		}
-		if err := compatibleClient(c, spec); err != nil {
-			excluded++
-			continue
-		}
 		addresses := spec.EndpointAddresses
 		if len(addresses) == 0 {
 			addresses = []string{address}
 		}
 		for _, address := range addresses {
+			spec.Address = address
+			if err := runtimeClientCompatibility(r, c, spec); err != nil {
+				excluded++
+				continue
+			}
 			endpoint := n
 			endpoint.Tag = clientpolicy.ExportName(n.Name, address)
 			endpoint.Family = clientpolicy.AddressFamily(address)
@@ -219,12 +219,36 @@ func (s *Server) previewPolicy(w http.ResponseWriter, r *http.Request) error {
 		if e != nil {
 			return bad(e.Error())
 		}
+		text, e = shadowrocketOptions(text, b.Native[c.Format])
+		if e != nil {
+			return e
+		}
 		send(w, 200, map[string]any{"preview_only": true, "text": text, "warnings": warnings, "nodes": nodes})
 		return nil
 	}
-	base := map[string]any{"outbounds": outs, "inbounds": []any{map[string]any{"listen": "127.0.0.1", "listen_port": 1080, "port": 1080, "type": "mixed", "protocol": "socks"}}}
-	if c.Format == "mihomo" {
+	var base map[string]any
+	switch c.Format {
+	case "mihomo":
 		base = map[string]any{"proxies": outs}
+	case "sing-box":
+		for _, value := range outs {
+			n := object(value)
+			delete(n, "name")
+			delete(n, "protocol")
+			delete(n, "settings")
+		}
+		outs = append(outs, map[string]any{"type": "direct", "tag": "direct"})
+		base = map[string]any{"outbounds": outs, "inbounds": []any{map[string]any{"type": "mixed", "listen": "127.0.0.1", "listen_port": 1080}}}
+	case "xray":
+		for _, value := range outs {
+			n := object(value)
+			delete(n, "name")
+			delete(n, "type")
+			delete(n, "server")
+			delete(n, "server_port")
+		}
+		outs = append(outs, map[string]any{"protocol": "freedom", "tag": "direct"}, map[string]any{"protocol": "blackhole", "tag": "block"})
+		base = map[string]any{"outbounds": outs, "inbounds": []any{map[string]any{"protocol": "socks", "listen": "127.0.0.1", "port": 1080}}}
 	}
 	config, warnings, e := resolved.Apply(c.Format, base)
 	if e != nil {
@@ -239,11 +263,18 @@ func (s *Server) previewPolicy(w http.ResponseWriter, r *http.Request) error {
 			return bad(e.Error())
 		}
 	}
+	appSingBoxConfig(c, config)
+	if modernSingBox(r, c) {
+		modernRuleSetHTTPClients(config)
+	}
+	if e := validateClientGraph(c.Format, config); e != nil {
+		return bad(e.Error())
+	}
 	send(w, 200, map[string]any{"preview_only": true, "config": config, "warnings": warnings, "excluded_nodes": excluded, "note": "仅编译预览，节点是本地不可用占位，不含身份信息；实际订阅仅包含该用户已授权且运行中的兼容节点"})
 	return nil
 }
 
 // Canonical sections are stored separately, while the source remains an editable representation.
 func validPolicyNativeFormat(format string) bool {
-	return slices.Contains([]string{"mihomo", "sing-box", "xray", "shadowrocket-config"}, strings.ToLower(format))
+	return slices.Contains([]string{"mihomo", "sing-box", "xray", "shadowrocket-config"}, format)
 }

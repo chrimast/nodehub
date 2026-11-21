@@ -2759,6 +2759,10 @@
                   "reality": {
                     "$ref": "#/components/schemas/Reality"
                   },
+                  "vless_encryption": {
+                    "type": "boolean",
+                    "description": "Enable generated VLESS Encryption for Xray VLESS XHTTP. Omit on update to preserve."
+                  },
                   "flow": {
                     "type": "string",
                     "enum": [
@@ -2802,6 +2806,12 @@
                   },
                   "clear_hysteria_obfs": {
                     "type": "boolean"
+                  },
+                  "xhttp_padding": {
+                    "type": "string",
+                    "pattern": "^[0-9]+-[0-9]+$",
+                    "default": "100-1000",
+                    "description": "Xray XHTTP xPaddingBytes range; applies to client and server Xray JSON."
                   }
                 }
               }
@@ -3188,15 +3198,16 @@
             }
           },
           {
+            "name": "client",
+            "in": "query",
+            "description": "Client ID from /api/v1/client-catalog, or auto to use User-Agent detection and the subscription preset.",
+            "schema": {"type": "string"}
+          },
+          {
             "name": "format",
             "in": "query",
-            "schema": {
-              "enum": [
-                "sing-box",
-                "clash",
-                "base64"
-              ]
-            }
+            "description": "Legacy format or client ID, used when client is absent or auto.",
+            "schema": {"type": "string"}
           }
         ]
       }
@@ -3633,6 +3644,10 @@
                   "reality": {
                     "$ref": "#/components/schemas/Reality"
                   },
+                  "vless_encryption": {
+                    "type": "boolean",
+                    "description": "Enable generated VLESS Encryption for Xray VLESS XHTTP. Omit on update to preserve."
+                  },
                   "flow": {
                     "type": "string",
                     "enum": [
@@ -3683,6 +3698,12 @@
                   },
                   "clear_hysteria_obfs": {
                     "type": "boolean"
+                  },
+                  "xhttp_padding": {
+                    "type": "string",
+                    "pattern": "^[0-9]+-[0-9]+$",
+                    "default": "100-1000",
+                    "description": "Xray XHTTP xPaddingBytes range; applies to client and server Xray JSON."
                   }
                 }
               }
@@ -3719,6 +3740,32 @@
           },
           "409": {
             "description": "Referenced by a chain or FRP client"
+          }
+        }
+      }
+    },
+    "/api/v1/live/{id}/reencrypt": {
+      "post": {
+        "summary": "Re-encrypt a readable live configuration with the current master key",
+        "responses": {
+          "200": {
+            "description": "Configuration re-encrypted and host resync requested"
+          },
+          "409": {
+            "description": "Configuration cannot be decrypted with the current key"
+          }
+        }
+      }
+    },
+    "/api/v1/live/{id}/force-clean": {
+      "post": {
+        "summary": "Force-remove an unreadable live configuration and request host resync",
+        "responses": {
+          "200": {
+            "description": "Control-plane record removed and host resync requested"
+          },
+          "400": {
+            "description": "Explicit confirmation is required"
           }
         }
       }
@@ -7566,7 +7613,11 @@
                   },
                   "origin": {
                     "type": "string",
-                    "description": "Exact configured HTTPS origin; bound into HMAC to prevent challenge relay"
+                    "description": "Exact control origin bound into the HMAC"
+                  },
+                  "allow_insecure_http": {
+                    "type": "boolean",
+                    "description": "Allow an explicit HTTP origin challenge"
                   }
                 }
               }
@@ -7623,10 +7674,10 @@
         ],
         "responses": {
           "200": {
-            "description": "Pinned command and selected HTTPS origin"
+            "description": "Pinned command and selected origin; HTTP fallback requires allow_insecure_http=1"
           },
           "400": {
-            "description": "Configure HTTPS origin first"
+            "description": "No usable origin for the requested transport"
           }
         }
       }
@@ -8087,7 +8138,50 @@
         "x-required-scopes": []
       }
     },
-    "/api/v1/reality-domain-scan": {"post":{"summary":"Discover TLS names on public IP prefix","description":"Probe HTTPS port 443 on up to 256 public addresses. Root administrator only; no port enumeration.","security":[{"AdminToken":[]}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object","required":["prefix"],"properties":{"prefix":{"type":"string","example":"8.8.8.0/29"}}}}}},"responses":{"200":{"description":"Discovered unique TLS certificate names"},"400":{"description":"Invalid, private, reserved, or oversized network prefix"},"401":{"description":"Unauthorized"},"403":{"description":"Forbidden"}}}}
+    "/api/v1/reality-domain-scan": {
+      "post": {
+        "summary": "Discover TLS names on public IP prefix",
+        "description": "Probe HTTPS port 443 on up to 256 public addresses. Root administrator only; no port enumeration.",
+        "security": [
+          {
+            "AdminToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "prefix"
+                ],
+                "properties": {
+                  "prefix": {
+                    "type": "string",
+                    "example": "8.8.8.0/29"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Discovered unique TLS certificate names"
+          },
+          "400": {
+            "description": "Invalid, private, reserved, or oversized network prefix"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        }
+      }
+    }
   },
   "components": {
     "securitySchemes": {
@@ -9411,6 +9505,10 @@
           "reality": {
             "$ref": "#/components/schemas/Reality"
           },
+          "vless_encryption": {
+            "type": "boolean",
+            "description": "Enable generated VLESS Encryption for Xray VLESS XHTTP. Omit on update to preserve."
+          },
           "flow": {
             "type": "string",
             "enum": [
@@ -9572,6 +9670,12 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 32
+          },
+          "xhttp_padding": {
+            "type": "string",
+            "pattern": "^[0-9]+-[0-9]+$",
+            "default": "100-1000",
+            "description": "Xray XHTTP xPaddingBytes range; applies to client and server Xray JSON."
           }
         }
       },

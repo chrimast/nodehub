@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"vps-control/internal/live"
 )
 
 func (f subscriptionFixture) compatible(limit int) {
@@ -140,7 +141,16 @@ func TestUserShareReusesOriginalLinkAndFormatMatrix(t *testing.T) {
 		if c.ID == "naive-proxy" {
 			continue
 		} // VMess is deliberately incompatible with Naive.
-		w := f.share(raw+"?client="+c.ID, nil, 200)
+		query := "?client=" + c.ID
+		check := obj018(f.h.call("GET", "subscriptions/"+f.subscription+"/check"+query, nil, 200, nil))
+		if check["ready"] != true || check["client"] != c.ID {
+			t.Fatalf("%s: wrong readiness %v", c.ID, check)
+		}
+		w := f.share(raw+query, nil, 200)
+		content := f.h.call("GET", "subscriptions/"+f.subscription+"/content"+query, nil, 200, nil)
+		if string(content) != w.Body.String() {
+			t.Fatalf("%s: content differs from public download", c.ID)
+		}
 		switch c.Format {
 		case "sing-box", "xray":
 			var config map[string]any
@@ -169,6 +179,17 @@ func TestUserShareReusesOriginalLinkAndFormatMatrix(t *testing.T) {
 	}
 	f.share(raw+"?client=flclash", nil, 200)
 }
+
+func TestUserShareFallsBackToRequestOriginWithoutSiteSettings(t *testing.T) {
+	f := newSubscriptionFixture(t, 0)
+	if _, e := f.h.s.DB.Exec(context.Background(), `DELETE FROM site_settings WHERE tenant_id=$1`, tenant); e != nil {
+		t.Fatal(e)
+	}
+	w := obj018(f.h.call("POST", "proxy-users/"+f.user+"/subscription", map[string]any{}, 200, nil))
+	if !strings.HasPrefix(w["url"].(string), "http://example.com/s/") {
+		t.Fatalf("unexpected fallback origin: %v", w["url"])
+	}
+}
 func TestSubscriptionPeerTrustBoundary(t *testing.T) {
 	for _, v := range []struct{ peer, header, want string }{{"192.0.2.1:5000", "203.0.113.1", "192.0.2.1"}, {"127.0.0.1:8091", "203.0.113.1", "203.0.113.1"}, {"[::1]:8091", "2001:db8::2", "2001:db8::2"}, {"127.0.0.1:8091", "garbage", "127.0.0.1"}} {
 		r := httptest.NewRequest("GET", "http://example.test", nil)
@@ -177,5 +198,88 @@ func TestSubscriptionPeerTrustBoundary(t *testing.T) {
 		if got := subscriptionPeer(r); got != v.want {
 			t.Fatal(v, got)
 		}
+	}
+}
+
+func TestCatalogPoliciesReachPreviewAndDownload(t *testing.T) {
+	f := newSubscriptionFixture(t, 0)
+	for _, c := range clients {
+		if !c.Full {
+			continue
+		}
+		t.Run(c.ID, func(t *testing.T) {
+			f := f
+			f.h.t = t
+			marker := c.ID + ".example.test"
+			body := map[string]any{"name": c.ID, "user_id": f.user, "client_id": c.ID, "source": "rules: ['DOMAIN," + marker + ",DIRECT','MATCH,PROXY']"}
+			if c.Format == "shadowrocket-config" {
+				body["native_options"] = map[string]any{c.Format: map[string]any{"general": map[string]any{"ipv6": false}}}
+			}
+			f.h.call("POST", "client-policies", body, 200, nil)
+			preview := f.h.call("POST", "client-policies/preview", bodyWithoutName(body), 200, nil)
+			raw := strings.Split(f.url, "?")[0] + "?client=" + c.ID
+			w := f.share(raw, nil, 200)
+			for _, data := range []string{string(preview), w.Body.String()} {
+				if !strings.Contains(data, marker) {
+					t.Fatal("missing selected client's policy")
+				}
+				if c.Format == "shadowrocket-config" && !strings.Contains(data, "ipv6 = false") {
+					t.Fatal("missing Shadowrocket override")
+				}
+				if c.Format == "sing-box" && !strings.Contains(data, "tun-in") {
+					t.Fatal("missing sing-box app inlet")
+				}
+			}
+		})
+	}
+}
+
+func bodyWithoutName(body map[string]any) map[string]any {
+	out := map[string]any{}
+	for k, v := range body {
+		if k != "name" {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+func TestNaiveShareIgnoresIncompatibleEndpointResolver(t *testing.T) {
+	f := newSubscriptionFixture(t, 0)
+	req := httptest.NewRequest("GET", "/", nil)
+	spec, err := f.h.s.loadSpec(req, f.node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec.Kind = "naive"
+	spec.ServerName = "naive.example.test"
+	spec.TLSMode = "tls"
+	sealed, err := live.Seal(f.h.s.MasterKey, mustJSON(spec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := f.addNode("other", 26020)
+	f.changeGroup([]string{f.node, other})
+	f.ack()
+	if _, err = f.h.s.DB.Exec(context.Background(), "UPDATE live_services SET kind='naive',sealed=$2 WHERE id=$1", f.node, sealed); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{"?client=naive-proxy", "?format=naive"} {
+		check := obj018(f.h.call("GET", "subscriptions/"+f.subscription+"/check"+q, nil, 200, nil))
+		if check["ready"] != true {
+			t.Fatal(check)
+		}
+		w := f.share(strings.Split(f.url, "?")[0]+q, nil, 200)
+		got := obj018(w.Body.Bytes())
+		if got["host-resolver-rules"] != "MAP naive.example.test 192.0.2.10" || !strings.HasSuffix(got["proxy"].(string), "@naive.example.test:26019") {
+			t.Fatal("wrong Naive endpoint")
+		}
+	}
+}
+
+func TestDedicatedPolicyRejectsUnsupportedGroupsBeforeSave(t *testing.T) {
+	h := api018{t, testControlDB(t)}
+	for _, client := range []string{"xray", "sing-box", "sfa", "hiddify", "base64"} {
+		h.call("POST", "client-policies", map[string]any{"name": "invalid", "client_id": client, "source": "proxy-groups: [{name: Group, type: fallback, proxies: [ALL]}]\nrules: ['MATCH,Group']"}, 400, nil)
 	}
 }

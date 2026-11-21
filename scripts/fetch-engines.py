@@ -32,7 +32,7 @@ def main():
     p.add_argument('--os',choices=['linux','windows'],default='windows' if os.name=='nt' else 'linux')
     p.add_argument('--arch',choices=['amd64','arm64'],default='arm64' if platform.machine().lower() in ('arm64','aarch64') else 'amd64')
     p.add_argument('--output');p.add_argument('--go',default='go',help='Compatibility argument; official binaries need no Go build')
-    for engine in ('sing-box','xray','frp'):p.add_argument('--'+engine+'-version',default='latest')
+    for engine in ('sing-box','xray','frp'):p.add_argument('--'+engine+'-version',default='v26.10.31' if engine=='xray' else 'latest')
     a=p.parse_args();dest=Path(a.output).resolve() if a.output else Path(__file__).resolve().parents[1]/'engines'
     if dest.exists():raise SystemExit('Output exists; stage a new engine directory')
     output={};receipt={}

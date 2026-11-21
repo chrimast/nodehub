@@ -1,4 +1,7 @@
 services:
+  web:
+    ports: !override
+      - "18080:8080"
   api:
     tmpfs:
       - /tmp

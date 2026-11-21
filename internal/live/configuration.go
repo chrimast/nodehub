@@ -47,8 +47,8 @@ func (s Spec) validateRouting() error {
 		if e := next.validateClient(); e != nil {
 			return e
 		}
-		if s.Engine != "xray" && next.Engine == "xray" && next.IsReality() {
-			return errors.New("pinned sing-box 1.14.4 cannot dial Xray 26.10.21 REALITY; choose a sing-box REALITY next hop")
+		if s.Engine != "xray" && next.Engine == "xray" && (next.IsReality() || next.Encryption != "") {
+			return errors.New("pinned sing-box 1.14.4 cannot dial Xray 26.10.31 REALITY; choose a sing-box REALITY next hop")
 		}
 		if s.Engine == "xray" && next.Kind != "shadowsocks" && next.Kind != "vless" && next.Kind != "vmess" && next.Kind != "trojan" && next.Kind != "http" && next.Kind != "socks" {
 			return errors.New("selected Xray outbound protocol unsupported")
@@ -71,7 +71,7 @@ func (s Spec) xrayOutbound(tag string) map[string]any {
 		if s.Kind == "vmess" {
 			user["security"] = "aes-128-gcm"
 		} else {
-			user["encryption"] = "none"
+			user["encryption"] = s.ClientEncryption()
 			if s.Flow != "" {
 				user["flow"] = s.Flow
 			}
@@ -84,7 +84,15 @@ func (s Spec) xrayStream(server bool) map[string]any {
 	stream := map[string]any{"network": "tcp", "security": "none"}
 	if s.Transport == "httpupgrade" || s.Transport == "xhttp" {
 		stream["network"] = s.Transport
-		stream[s.Transport+"Settings"] = map[string]any{"path": s.Path}
+		settings := map[string]any{"path": s.Path}
+		if s.Transport == "xhttp" {
+			padding := s.XHTTPPadding
+			if padding == "" {
+				padding = "100-1000"
+			}
+			settings["extra"] = map[string]any{"xPaddingBytes": padding}
+		}
+		stream[s.Transport+"Settings"] = settings
 		if s.WSHost != "" {
 			stream[s.Transport+"Settings"].(map[string]any)["host"] = s.WSHost
 		}
@@ -130,6 +138,9 @@ func (s Spec) renderXray() (string, map[string][]byte, error) {
 		user["id"] = s.UUID
 		if s.Kind == "vless" {
 			settings["decryption"] = "none"
+			if s.Decryption != "" {
+				settings["decryption"] = s.Decryption
+			}
 		}
 	} else {
 		user["password"] = s.Password
@@ -240,6 +251,7 @@ func (s Spec) validateClient() error {
 		check.TLSMode = "tls"
 	}
 	check.Flow = ""
+	check.Encryption = ""
 	if e := check.validateRouting(); e != nil {
 		return e
 	}

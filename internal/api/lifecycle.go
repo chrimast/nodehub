@@ -1,13 +1,13 @@
 package api
 
 import (
-	"vps-control/internal/store"
 	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
+	"vps-control/internal/store"
 
-		"vps-control/internal/live"
+	"vps-control/internal/live"
 )
 
 // The same graph lock protects permission changes, topology edits and stop acknowledgements.
@@ -179,6 +179,94 @@ func (s *Server) liveDelete(w http.ResponseWriter, r *http.Request) error {
 		status = 200
 	}
 	send(w, status, map[string]bool{"deleted": done, "pending_stop": !done})
+	return nil
+}
+
+func (s *Server) liveReencrypt(w http.ResponseWriter, r *http.Request) error {
+	tx, e := s.DB.Begin(r.Context())
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(r.Context())
+	if e = graphLock(r, tx); e != nil {
+		return e
+	}
+	id := r.PathValue("id")
+	var sealed []byte
+	var host string
+	if e = tx.QueryRow(r.Context(), `SELECT sealed,host_id FROM live_services WHERE tenant_id=$1 AND id=$2 AND delete_requested_at IS NULL FOR UPDATE`, tenant, id).Scan(&sealed, &host); e != nil {
+		return e
+	}
+	plain, e := live.Open(s.MasterKey, sealed)
+	if e != nil {
+		return problem{409, "协议配置无法用当前 MASTER_KEY 解密，请使用强制清理后重新添加"}
+	}
+	sealed, e = live.Seal(s.MasterKey, plain)
+	if e != nil {
+		return e
+	}
+	if _, e = tx.Exec(r.Context(), `UPDATE live_services SET sealed=$3,version=version+1,state='pending' WHERE tenant_id=$1 AND id=$2`, tenant, id, sealed); e != nil {
+		return e
+	}
+	if _, e = tx.Exec(r.Context(), `UPDATE live_services SET version=version+1,state='pending' WHERE tenant_id=$1 AND host_id=$2 AND id<>$3 AND delete_requested_at IS NULL`, tenant, host, id); e != nil {
+		return e
+	}
+	if e = audit(r.Context(), tx, "admin", "live.reencrypt", id); e != nil {
+		return e
+	}
+	if e = tx.Commit(r.Context()); e != nil {
+		return e
+	}
+	send(w, 200, map[string]any{"id": id, "reencrypted": true, "resync": true})
+	return nil
+}
+
+func (s *Server) liveForceClean(w http.ResponseWriter, r *http.Request) error {
+	var b struct {
+		Confirm bool `json:"confirm"`
+	}
+	if e := decode(w, r, &b); e != nil {
+		return e
+	}
+	if !b.Confirm {
+		return bad("confirm is required")
+	}
+	tx, e := s.DB.Begin(r.Context())
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(r.Context())
+	if e = graphLock(r, tx); e != nil {
+		return e
+	}
+	id := r.PathValue("id")
+	var host string
+	if e = tx.QueryRow(r.Context(), `SELECT host_id FROM live_services WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, tenant, id).Scan(&host); e != nil {
+		return e
+	}
+	var dependencies int
+	if e = tx.QueryRow(r.Context(), `SELECT count(*) FROM live_services WHERE tenant_id=$1 AND (next_id=$2 OR parent_id=$2)`, tenant, id).Scan(&dependencies); e != nil {
+		return e
+	}
+	if dependencies > 0 {
+		return problem{409, "此配置仍被链式出站或 FRP 客户端引用，请先修改或删除引用方"}
+	}
+	if e = prunePolicyNodes(r, tx, map[string]bool{id: true}); e != nil {
+		return e
+	}
+	if e = purgeLive(r, tx, id); e != nil {
+		return e
+	}
+	if _, e = tx.Exec(r.Context(), `UPDATE live_services SET version=version+1,state='pending' WHERE tenant_id=$1 AND host_id=$2 AND delete_requested_at IS NULL`, tenant, host); e != nil {
+		return e
+	}
+	if e = audit(r.Context(), tx, "admin", "live.force-clean", id); e != nil {
+		return e
+	}
+	if e = tx.Commit(r.Context()); e != nil {
+		return e
+	}
+	send(w, 200, map[string]any{"id": id, "deleted": true, "resync": true, "notice": "已清理控制端记录，Agent 将在下一次同步时停止旧协议并重建剩余配置"})
 	return nil
 }
 

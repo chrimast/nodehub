@@ -4,6 +4,7 @@ import {mount,flushPromises} from '@vue/test-utils'
 import Subscriptions from './Subscriptions.vue'
 import QRCode from 'qrcode'
 vi.mock('qrcode',()=>({default:{toDataURL:vi.fn(async()=> 'data:image/png;base64,bG9jYWw=')}}))
+
 it('offers the existing management origin as an explicit fallback for links and QR codes',async()=>{
  const api=vi.fn(async(p:string)=>p==='site'?{domain:'panel.example.com',https:true,share_domain:'sub.example.com'}:p==='proxy-users/u/subscription'?{id:'s',url:'https://sub.example.com/s/private',reused:true}:p==='proxy-users'?[{id:'u',name:'Alice',active:true}]:p.startsWith('subscriptions/s/check')?{ready:true,reason:'ok'}:[])
  const w=mount(Subscriptions,{props:{api,initialUser:'u'}});await flushPromises()
@@ -76,15 +77,36 @@ it('opens the existing user share without an add-subscription modal',async()=>{
  w.unmount()
 })
 
+it('shows the API reason when opening a selected user share fails',async()=>{
+ const api=vi.fn(async(p:string)=>p==='proxy-users'?[{id:'u',name:'User 1',active:true}]:p==='proxy-users/u/subscription'?Promise.reject(new Error('用户尚未加入包含已应用协议的用户组')):[])
+ const w=mount(Subscriptions,{props:{api}});await flushPromises();await w.get('select[aria-label="选择用户打开原订阅链接"]').setValue('u');await flushPromises();expect(w.text()).toContain('用户尚未加入包含已应用协议的用户组');w.unmount()
+})
+
 it('separates app formats and generates a QR locally only after a successful check',async()=>{
  const api=vi.fn(async(p:string)=>p==='proxy-users/u/subscription'?{id:'s',url:'https://example.test/s/private',reused:true}:p==='proxy-users'?[{id:'u',name:'Alice',active:true}]:p.startsWith('subscriptions/s/check')?{ready:true,reason:'ok'}:[])
  const w=mount(Subscriptions,{props:{api,initialUser:'u'}});await flushPromises()
+ const options=w.get('select[aria-label=客户端格式]').findAll('option').map((o:{element:HTMLOptionElement})=>o.element.value)
+ expect(options).toEqual(['auto','base64','v2rayn','v2rayng','mihomo','shadowrocket','sing-box-latest','xray'])
  await w.get('select[aria-label=客户端格式]').setValue('v2rayng');await flushPromises()
  expect((w.get('input[readonly]').element as HTMLInputElement).value).toContain('client=v2rayng&policy=nodes-only')
  await w.findAll('button').find(b=>b.text()==='生成二维码')!.trigger('click');await flushPromises()
  expect(w.get('.share-qr img').attributes('src')).toBe('data:image/png;base64,bG9jYWw=')
- await w.get('select[aria-label=客户端格式]').setValue('hiddify');await flushPromises()
+ await w.get('select[aria-label=客户端格式]').setValue('v2rayn');await flushPromises()
  expect(w.find('.share-qr').exists()).toBe(false)
- expect((w.get('input[readonly]').element as HTMLInputElement).value).toContain('client=hiddify')
+ expect((w.get('input[readonly]').element as HTMLInputElement).value).toContain('client=v2rayn&policy=nodes-only')
  w.unmount()
+})
+
+
+it('offers SFA in advanced formats and checks the same link it encodes',async()=>{
+ const api=vi.fn(async(p:string)=>p==='client-catalog'?[{id:'sfa',name:'SFA / SFI',full_config:true}]:p==='proxy-users/u/subscription'?{id:'s',url:'https://example.test/s/private'}:p.startsWith('subscriptions/s/check')?{ready:true}:[])
+ const w=mount(Subscriptions,{props:{api,initialUser:'u'}});await flushPromises()
+ const click=(text:string)=>w.findAll('button').find(b=>b.text()===text)!.trigger('click')
+ try {
+  await click('高级选项');await w.get('select[aria-label=客户端格式]').setValue('sfa');await flushPromises()
+  expect(api).toHaveBeenCalledWith('subscriptions/s/check?client=sfa')
+  await click('生成二维码');await flushPromises()
+  const qr=new URL(vi.mocked(QRCode.toDataURL).mock.calls.at(-1)![0] as string)
+  expect(qr.searchParams.get('url')).toBe('https://example.test/s/private?client=sfa')
+ } finally {w.unmount()}
 })

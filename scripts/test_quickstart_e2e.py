@@ -213,7 +213,7 @@ def main():
     api('hosts/'+host['id']+'/retirement',{},202)
     api('hosts/'+host['id']+'/rotate-agent-token',{},404)
     wait(lambda:all(h['id']!=host['id'] for h in api('hosts')),'Root cleanup and authenticated purge acknowledgement',150)
-    paths=('/opt/harbor-agent','/etc/harbor-agent/agent.env','/var/lib/harbor-agent/live','/etc/systemd/system/harbor-agent.service','/etc/harbor-agent-cleanup.json')
+    paths=('/opt/harbor-agent','/etc/harbor-agent/agent.env','/var/lib/harbor-agent/live','/etc/systemd/system/nodehub-agent.service','/etc/systemd/system/harbor-agent.service','/etc/harbor-agent-cleanup.json')
     wait(lambda:all(not Path(path).exists() for path in paths),'Agent files and units fully removed',30)
     assert all(v['id']!=row['id'] for v in api('live'))
     api('agent/heartbeat',{},401,agent=credentials)

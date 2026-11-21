@@ -63,6 +63,35 @@ func removeOwned(path string) error {
 	// RemoveAll does not traverse symlink entries. Every top-level path is local and allowlisted.
 	return os.RemoveAll(path)
 }
+
+func ownedAgentUnits(dir, env string) ([]string, error) {
+	var units []string
+	for _, name := range []string{"nodehub-agent.service", "harbor-agent.service"} {
+		path := filepath.Join(dir, name)
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		for _, line := range strings.Split(string(body), "\n") {
+			if strings.TrimSpace(line) == "EnvironmentFile="+env {
+				units = append(units, path)
+				break
+			}
+		}
+	}
+	return units, nil
+}
+
 func run() error {
 	config := "/etc/harbor-agent-cleanup.json"
 	if runtime.GOOS == "windows" {
@@ -147,8 +176,17 @@ func run() error {
 				return e
 			}
 		} else {
-			if e = exec.Command("/usr/bin/systemctl", "disable", "--now", "harbor-agent.service").Run(); e != nil {
-				return e
+			units, err := ownedAgentUnits("/etc/systemd/system", m.Env)
+			if err != nil {
+				return err
+			}
+			if len(units) == 0 {
+				return errors.New("no owned Agent service found; refusing to remove installation files")
+			}
+			for _, unit := range units {
+				if e = exec.Command("/usr/bin/systemctl", "disable", "--now", filepath.Base(unit)).Run(); e != nil {
+					return e
+				}
 			}
 			if _, err := os.Stat("/usr/local/libexec/starhub-agent-network.py"); err == nil {
 				if e = exec.Command("/usr/bin/systemctl", "disable", "--now", "starhub-agent-network.timer").Run(); e != nil {
@@ -182,6 +220,20 @@ func run() error {
 			return e
 		}
 	}
+	if runtime.GOOS != "windows" {
+		units, err := ownedAgentUnits("/etc/systemd/system", m.Env)
+		if err != nil {
+			return err
+		}
+		for _, unit := range units {
+			if e = os.Remove(unit); e != nil && !os.IsNotExist(e) {
+				return e
+			}
+		}
+		if e = exec.Command("/usr/bin/systemctl", "daemon-reload").Run(); e != nil {
+			return e
+		}
+	}
 	// Keep the marker and credential until the controller confirms the purge.
 	if e = call("ack"); e != nil {
 		return e
@@ -192,10 +244,7 @@ func run() error {
 	os.Remove(m.Marker)
 	os.Remove(filepath.Dir(m.Env))
 	os.Remove(filepath.Dir(m.Marker))
-	if runtime.GOOS != "windows" {
-		os.Remove("/etc/systemd/system/harbor-agent.service")
-		exec.Command("/usr/bin/systemctl", "daemon-reload").Run()
-	}
+
 	os.Remove(config)
 	if runtime.GOOS != "windows" {
 		exec.Command("/usr/bin/systemctl", "disable", "--now", "harbor-agent-cleanup.timer").Run()

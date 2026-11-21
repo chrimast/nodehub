@@ -1,10 +1,10 @@
 # 星枢 · VPS 多机管理 0.25.5（nodehub / SQLite）
 
-本仓库 [chrimast/nodesub](https://github.com/chrimast/nodesub) 是 fork 后的 **SQLite 版**：不部署 PostgreSQL。网页 `IP:18080`，登录令牌为 `ADMIN_TOKEN`。不要和官方一键 `/opt/starhub-control` 装在同一台抢端口。`MASTER_KEY` 部署后不能更换。
+本仓库 [chrimast/nodehub](https://github.com/chrimast/nodehub) 是 **SQLite 版**，不部署 PostgreSQL。不要与官方一键部署共用端口。请备份 `MASTER_KEY`，更换它会导致已有凭据无法解密。
 
 ## 1Panel Compose 部署
 
-在 1Panel「容器 → Compose」新建应用，编排内容粘贴下面整份 YAML。应用目录可自建空的 `agent-releases/`（没有 Agent 包也能先起面板）。环境变量在同一应用里填写，不要写进 YAML。
+在 1Panel「容器 → Compose」新建应用，编排内容粘贴下面整份 YAML。API 镜像构建时会生成两个 Linux 架构的 Agent 安装包，需要能访问 GitHub。环境变量在同一应用里填写，不要写进 YAML。
 
 需要填写：
 
@@ -16,7 +16,7 @@ name: nodehub
 services:
   api:
     build:
-      context: https://github.com/chrimast/nodesub.git
+      context: https://github.com/chrimast/nodehub.git#main
       dockerfile: Dockerfile
     image: nodehub-api:nodehub
     environment:
@@ -45,11 +45,11 @@ services:
     restart: unless-stopped
   web:
     build:
-      context: https://github.com/chrimast/nodesub.git#:web
+      context: https://github.com/chrimast/nodehub.git#main:web
       dockerfile: Dockerfile
     image: nodehub-web:nodehub
     ports:
-      - "18080:8080"
+      - "127.0.0.1:18080:8080"
     depends_on:
       api:
         condition: service_healthy
@@ -68,7 +68,7 @@ volumes:
 python3 -c 'import secrets; print("ADMIN_TOKEN="+secrets.token_urlsafe(32)); print("MASTER_KEY="+secrets.token_hex(32))'
 ```
 
-部署完成后打开 `http://服务器IP:18080`，用 `ADMIN_TOKEN` 登录。SQLite 文件在 Compose 卷 `nodehub-data` 的 `/state/nodehub.db`。
+部署完成后，本机入口是 `http://127.0.0.1:18080`。远程使用时请通过 HTTPS 反代访问，并在面板设置中登记相同的 HTTPS 域名，再生成 Agent 修复或升级命令。不要在公网 HTTP 上传输管理员密码或令牌。SQLite 文件在 Compose 卷 `nodehub-data` 的 `/state/nodehub.db`。
 
 源码在本仓库根目录时，也可以直接用仓库里的 `compose.yaml`：
 
@@ -360,7 +360,7 @@ cd web && npm ci && npm test && npm run build
 
 ## 内核与一键接入包
 
-安装器采用固定下载地址和 SHA-256 校验。本版使用官方 sing-box 1.14.4、Xray 26.10.21、FRP 0.71.1 发行文件。下载时核对官方资产 SHA-256，不再使用本项目定制后缀。主机卡片的“内核版本”可以查询最新稳定版、安装或切换指定版本；Agent 先检查当前配置，启动失败时回退。
+安装器采用固定下载地址和 SHA-256 校验。本版使用官方 sing-box 1.14.4、Xray 26.10.31、FRP 0.71.1 发行文件。下载时核对官方资产 SHA-256，不再使用本项目定制后缀。主机卡片的“内核版本”可以查询最新稳定版、安装或切换指定版本；Agent 先检查当前配置，启动失败时回退。
 
 ```bash
 python scripts/fetch-engines.py
@@ -400,7 +400,7 @@ Linux / Windows 通用命令见本文前部，更多布局见 [安装文档](doc
 
 先保持旧域名可达，设置并验证新地址。Agent **0.23.17+** 从已鉴权心跳获取地址，通过绑定目标域名和随机挑战的 HMAC 证明后切换；不跟随 HTTP 重定向、不绕过 TLS、不向未经验证的目标发送令牌。已验证地址保存在私有状态目录，重启后可恢复。变更时请保留旧入口，等全部主机的“控制地址”回报更新后再关闭。
 
-若原地址已失效，进入「连接主机 → 连接 / 恢复 → 生成控制端地址修复命令」，在原 VPS SSH 执行。保留 HOST_ID / AGENT_TOKEN、内核、协议配置和流量账本，无需删除主机或重新注册。“生成 Agent 升级命令”会校验本控制端版本对应的 GitHub 正式发行包，仅更新标准 Linux `/opt/harbor-agent` 安装的 Agent；失败恢复旧二进制，现有内核不切换。总管理机的旧布局 Agent 由面板升级流程维护。两种操作均可能短暂中断本机托管代理。
+若原地址已失效，进入「连接主机 → 连接 / 恢复 → 生成控制端地址修复命令」，在原 VPS SSH 执行。地址修复沿用现有服务名。新安装使用 `nodehub-agent.service`；升级命令从已验证身份的 HTTPS 控制端下载并校验 Agent，支持将标准安装的 `harbor-agent.service` 迁移为新名称。启动检查失败会回退单元和二进制；身份凭据、现有内核、协议配置和流量账本继续沿用。带自定义 drop-in 的旧单元需先手动迁移；非标准安装请使用原维护流程。两种操作均可能短暂中断本机托管代理。
 
 ## 数据库内存
 

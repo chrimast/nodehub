@@ -25,10 +25,11 @@ class BootstrapTests(unittest.TestCase):
         self.archive=package.getvalue()
         def mapped(value):
             value=str(value)
-            if value.startswith(('/opt/harbor-agent','/etc/harbor-agent','/etc/systemd/system/harbor-agent','/var/lib/harbor-agent','/usr/local/libexec/harbor-agent-cleanup')):return self.root/value.lstrip('/')
+            if value.startswith(('/opt/harbor-agent','/etc/harbor','/etc/systemd/system/','/var/lib/harbor-agent','/usr/local/libexec/harbor-agent-cleanup')):return self.root/value.lstrip('/')
             return Path(value)
         def run(arguments,**kwargs):
             if arguments[0]=='id':return subprocess.CompletedProcess(arguments,1)
+            if arguments[:2]==['systemctl','show']:return subprocess.CompletedProcess(arguments,0,stdout='not-found\n')
             if self.failure and arguments[:2]==('systemctl','is-active'):raise subprocess.CalledProcessError(1,arguments)
             return subprocess.CompletedProcess(arguments,0)
         def fetch(request,**kwargs):
@@ -50,13 +51,23 @@ class BootstrapTests(unittest.TestCase):
             self.assertEqual((self.root/'opt/harbor-agent').stat().st_mode&0o777,0o755)
             self.assertEqual(binary.stat().st_mode&0o777,0o755)
             self.assertEqual((self.root/'etc/harbor-agent/agent.env').stat().st_mode&0o777,0o600)
-        self.assertIn('AF_NETLINK',(self.root/'etc/systemd/system/harbor-agent.service').read_text())
+        self.assertIn('AF_NETLINK',(self.root/'etc/systemd/system/nodehub-agent.service').read_text())
+        self.assertFalse((self.root/'etc/systemd/system/harbor-agent.service').exists())
 
     def test_failed_service_start_rolls_back_only_new_installation(self):
         self.failure=True
         with self.assertRaises(subprocess.CalledProcessError):self.module.main()
         self.module.rollback_install()
-        for name in ('opt/harbor-agent','etc/harbor-agent','var/lib/harbor-agent','etc/systemd/system/harbor-agent.service'):self.assertFalse((self.root/name).exists())
+        for name in ('opt/harbor-agent','etc/harbor-agent','var/lib/harbor-agent','etc/systemd/system/nodehub-agent.service'):self.assertFalse((self.root/name).exists())
+
+    def test_existing_unit_or_mask_blocks_fresh_install(self):
+        for name in ('nodehub-agent.service','harbor-agent.service'):
+            with self.subTest(name=name):
+                unit=self.root/'etc/systemd/system'/name
+                unit.symlink_to(self.root/'missing')
+                with self.assertRaisesRegex(ValueError,'Existing Agent'):self.module.main()
+                self.assertTrue(unit.is_symlink())
+                unit.unlink()
 
     def test_existing_agent_is_preserved(self):
         folder=self.root/'opt/harbor-agent';folder.mkdir();(folder/'existing').write_text('keep')

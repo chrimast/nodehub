@@ -217,6 +217,8 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("DELETE /api/v1/client-profiles/{id}", s.admin(s.removeManaged))
 	m.HandleFunc("DELETE /api/v1/subscriptions/{id}", s.admin(s.removeManaged))
 	m.HandleFunc("DELETE /api/v1/live/{id}", s.admin(s.liveDelete))
+	m.HandleFunc("POST /api/v1/live/{id}/reencrypt", s.admin(s.liveReencrypt))
+	m.HandleFunc("POST /api/v1/live/{id}/force-clean", s.admin(s.liveForceClean))
 	m.HandleFunc("PUT /api/v1/subscriptions/{id}", s.admin(s.subscriptionUpdate))
 	m.HandleFunc("POST /api/v1/subscriptions/{id}/independent-identity", s.admin(s.migrateSubscriptionIdentity))
 	m.HandleFunc("GET /api/v1/subscriptions/{id}/link", s.admin(s.subscriptionLink))

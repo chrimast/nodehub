@@ -4,7 +4,12 @@ set -euo pipefail
 command -v systemctl >/dev/null || { echo 'systemd required; on Alpine use the documented foreground/OpenRC method.'; exit 1; }
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 [[ -f bin/harbor-agent && -f .agent.env ]] || { echo 'Build agent and create .agent.env using docs/INSTALL.md first.'; exit 1; }
-[[ ! -e /etc/systemd/system/harbor-agent.service ]] || { echo 'Existing service found; update deliberately with backup.'; exit 1; }
+for path in /etc/systemd/system/{nodehub-agent,harbor-agent}.service /etc/{harbor,harbor-agent}/agent.env /opt/harbor-agent; do
+ [[ ! -e "$path" && ! -L "$path" ]] || { echo 'Existing Agent found; update deliberately with backup.'; exit 1; }
+done
+for unit in nodehub-agent.service harbor-agent.service; do
+ [[ $(systemctl show --property=LoadState --value "$unit") = not-found ]] || { echo "Existing Agent or unavailable systemd ($unit)."; exit 1; }
+done
 getent passwd harbor >/dev/null || useradd --system --home-dir /var/lib/harbor --shell /usr/sbin/nologin harbor
 install -d -o root -g harbor -m 0750 /opt/harbor /etc/harbor
 install -d -o harbor -g harbor -m 0700 /var/lib/harbor/live
@@ -24,9 +29,9 @@ for line in s.splitlines():
  lines.append(line)
 p.write_text('\n'.join(lines)+'\n')
 PY
-cat > /etc/systemd/system/harbor-agent.service <<'UNIT'
+(set -o noclobber; cat > /etc/systemd/system/nodehub-agent.service) <<'UNIT'
 [Unit]
-Description=Harbor outbound Agent and constrained engine supervisor
+Description=NodeHub outbound Agent and constrained engine supervisor
 After=network-online.target
 Wants=network-online.target
 [Service]
@@ -52,5 +57,5 @@ TasksMax=96
 WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
-systemctl enable --now harbor-agent
-systemctl --no-pager status harbor-agent
+systemctl enable --now nodehub-agent.service
+systemctl --no-pager status nodehub-agent.service

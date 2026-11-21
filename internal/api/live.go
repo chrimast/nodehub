@@ -2,8 +2,8 @@ package api
 
 import (
 	"context"
-	"errors"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -250,6 +250,7 @@ type liveInput struct {
 	ClearHY2Obfs      bool          `json:"clear_hy2_obfs"`
 	Reality           *live.Reality `json:"reality"`
 	Flow              string        `json:"flow"`
+	VLESSEncryption   *bool         `json:"vless_encryption"`
 	ALPN              []string      `json:"alpn"`
 	Congestion        string        `json:"congestion"`
 	WSHost            string        `json:"ws_host"`
@@ -426,6 +427,9 @@ func (s *Server) createLiveTx(r *http.Request, tx store.Tx, b liveInput, created
 		return bad(e.Error())
 	}
 	if e := requireFRPVersion(r, tx, b.HostID, spec); e != nil {
+		return e
+	}
+	if e := requireVLESSAgent(r, tx, b.HostID, spec); e != nil {
 		return e
 	}
 	if e := requireHopping(r, tx, b.HostID, spec); e != nil {
@@ -745,6 +749,9 @@ func (s *Server) liveSync(w http.ResponseWriter, r *http.Request, host string) e
 		if hasFRPUDP(v.Spec) && !engineUpdateCapable(agentVersion) {
 			v.Enabled = false
 		}
+		if v.Spec.Encryption != "" && !encryptionCapable(agentVersion) {
+			v.Enabled = false
+		}
 		if v.Spec.RequiresHopping() && !live.HoppingCapable(agentVersion) {
 			v.Enabled = false
 		}
@@ -789,6 +796,9 @@ func (s *Server) liveSync(w http.ResponseWriter, r *http.Request, host string) e
 			var next live.Spec
 			if e = json.Unmarshal(raw, &next); e != nil {
 				return e
+			}
+			if next.Encryption != "" && !encryptionCapable(agentVersion) {
+				work[i].Enabled = false
 			}
 			if next.NeedsTunedClientAgent() && !live.ClientTuningCapable(agentVersion) {
 				work[i].Enabled = false
@@ -884,7 +894,16 @@ func (s *Server) managementOrigin(r *http.Request) (string, error) {
 	}
 	return origin, err
 }
-func (s *Server) publicOrigin(r *http.Request) (string, error)     { return s.siteOrigin(r, true) }
+func (s *Server) publicOrigin(r *http.Request) (string, error) {
+	origin, err := s.siteOrigin(r, true)
+	if errors.Is(err, store.ErrNoRows) {
+		origin = requestOrigin(r)
+		if live.Origin(origin) {
+			return origin, nil
+		}
+	}
+	return origin, err
+}
 func (s *Server) siteOrigin(r *http.Request, share bool) (string, error) {
 	return s.siteOriginFrom(s.DB, r.Context(), share)
 }
@@ -975,7 +994,7 @@ func (s *Server) subscriptionCreate(w http.ResponseWriter, r *http.Request) erro
 			return err
 		}
 		if len(b.ServiceIDs) == 0 {
-			return bad("assign user to an authorized inbound group first")
+			return problem{400, "用户尚未加入包含已应用协议的用户组；先在用户权限页把用户加入已授权该协议的用户组，并确认主机已应用成功，再生成分享链接"}
 		}
 	}
 	id, token := ID(), ID()+ID()

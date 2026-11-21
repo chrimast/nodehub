@@ -610,7 +610,7 @@ func jsonValueExpr(c string) string {
 		name = c[i+1:]
 	}
 	switch strings.ToLower(name) {
-	case "enabled", "online", "paused", "connection_paused", "cleanup_capable", "fresh", "limited", "managed_users", "commercial_only", "independent_identity", "all_nodes", "hwid_registered", "active", "certbot_available", "cloudflare_available", "is_uplink", "legacy_credentials", "auto_reset", "closed", "ready", "hwid_required":
+	case "enabled", "online", "paused", "connection_paused", "cleanup_capable", "fresh", "limited", "managed_users", "commercial_only", "independent_identity", "all_nodes", "hwid_registered", "active", "certbot_available", "cloudflare_available", "is_uplink", "legacy_credentials", "auto_reset", "closed", "ready", "hwid_required", "available", "current":
 		return "json(CASE WHEN " + c + " THEN 'true' ELSE 'false' END)"
 	}
 	return "iif(typeof(" + c + ")='blob',json(" + c + "),iif(typeof(" + c + ")='text' AND (substr(" + c + ",1,1) IN ('{','[') OR " + c + " IN ('true','false','null')),json(" + c + ")," + c + "))"

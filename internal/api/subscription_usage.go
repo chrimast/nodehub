@@ -25,6 +25,12 @@ func sendBlockedClient(w http.ResponseWriter, format string, port int) error {
 		w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
 		_, e = w.Write(raw)
 		return e
+	case "mihomo-nodes":
+		w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
+		_, e := fmt.Fprintln(w, "proxies: []")
+		return e
+	case "naive":
+		return problem{403, "用户流量额度已用尽"}
 	case "shadowrocket-config":
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fmt.Fprint(w, "[General]\n[Rule]\nFINAL,REJECT\n")
@@ -157,11 +163,16 @@ func (s *Server) inspectSubscription(w http.ResponseWriter, r *http.Request) err
 				return e
 			}
 			stage := "configuration"
+			if usage.Remaining != nil && *usage.Remaining <= 0 && recorder.Header().Get("Subscription-Userinfo") != "" {
+				stage = "quota"
+			}
 			switch p.status {
 			case 404:
 				stage = "subscription"
 			case 403:
-				stage = "authorization"
+				if stage != "quota" {
+					stage = "authorization"
+				}
 			case 503:
 				stage = "nodes"
 			case 422:
@@ -187,7 +198,7 @@ func (s *Server) inspectSubscription(w http.ResponseWriter, r *http.Request) err
 		return nil
 	}
 	var config any
-	if query.Get("client") == "shadowrocket-config" && strings.Contains(recorder.Body.String(), "[Rule]") {
+	if recorder.Header().Get("X-Starhub-Client") == "shadowrocket-config" && strings.Contains(recorder.Body.String(), "[Rule]") {
 		config = recorder.Body.String()
 	}
 

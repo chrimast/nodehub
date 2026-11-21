@@ -114,6 +114,8 @@ type Tunnel struct {
 	RemotePort int    `json:"remote_port"`
 }
 type Spec struct {
+	Encryption        string   `json:"encryption,omitempty"`
+	Decryption        string   `json:"decryption,omitempty"`
 	EndpointAddresses []string `json:"endpoint_addresses,omitempty"`
 	EgressFamilies    []string `json:"egress_families,omitempty"`
 	ProtocolOptions

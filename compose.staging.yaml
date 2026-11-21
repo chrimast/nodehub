@@ -1,7 +1,14 @@
 # Explicit opt-in: private config staging only, no systemd, firewall, engine run or public listeners.
 services:
   agent:
+    profiles: [demo]
+    build: .
+    entrypoint: [/app/agent]
     environment:
+      CONTROL_URL: http://api:8080
+      ALLOW_INSECURE_HTTP: "1"
+      HOST_ID: ${HOST_ID:?Register a staging host first}
+      AGENT_TOKEN: ${AGENT_TOKEN:?Set the staging Agent token}
       AGENT_MODE: staging
       STATE_DIR: /state
       ENGINE_SECRET: ${ENGINE_SECRET:?Generate and preserve a private local engine secret}

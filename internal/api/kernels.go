@@ -8,7 +8,7 @@ import (
 
 func (s *Server) kernels(w http.ResponseWriter, r *http.Request) error {
 	var raw json.RawMessage
-	e := s.DB.QueryRow(r.Context(), `SELECT COALESCE(jsonb_agg(x),'[]') FROM (SELECT k.*,(k.available AND k.checked_at>now()-interval '45 seconds') ready,(k.applied_checksum=k.desired_checksum AND k.desired_checksum<>'' AND k.reported_at>now()-interval '45 seconds') current,(SELECT count(*) FROM live_services l WHERE l.tenant_id=k.tenant_id AND l.host_id=k.host_id AND l.engine=k.engine AND l.kind NOT IN ('frps','frpc')) inbounds,(SELECT count(*) FROM kernel_revisions v WHERE v.tenant_id=k.tenant_id AND v.host_id=k.host_id AND v.engine=k.engine) revisions FROM host_kernels k WHERE k.tenant_id=$1 AND k.host_id=$2 ORDER BY k.engine) x`, tenant, r.PathValue("id")).Scan(&raw)
+	e := s.DB.QueryRow(r.Context(), `SELECT COALESCE(jsonb_agg(x),'[]') FROM (SELECT k.engine,k.version,k.available,k.checked_at,k.desired_checksum,k.applied_checksum,k.state,k.reported_at,(k.available AND k.checked_at>now()-interval '45 seconds') ready,(k.applied_checksum=k.desired_checksum AND k.desired_checksum<>'' AND k.reported_at>now()-interval '45 seconds') current,(SELECT count(*) FROM live_services l WHERE l.tenant_id=k.tenant_id AND l.host_id=k.host_id AND l.engine=k.engine AND l.kind NOT IN ('frps','frpc')) inbounds,(SELECT count(*) FROM kernel_revisions v WHERE v.tenant_id=k.tenant_id AND v.host_id=k.host_id AND v.engine=k.engine) revisions FROM host_kernels k WHERE k.tenant_id=$1 AND k.host_id=$2 ORDER BY k.engine) x`, tenant, r.PathValue("id")).Scan(&raw)
 	if e != nil {
 		return e
 	}

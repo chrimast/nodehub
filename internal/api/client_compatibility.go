@@ -37,6 +37,10 @@ func compatibleClient(c clientInfo, endpoint live.Spec) error {
 		if !slices.Contains([]string{"shadowsocks", "vless", "vmess", "trojan", "hysteria2", "tuic", "anytls", "socks"}, endpoint.Kind) {
 			return fmt.Errorf("v2rayN 尚无已验证的 %s 节点链接", endpoint.Kind)
 		}
+		// v2rayN imports these URI fields into its Xray outbound, not a sing-box profile.
+		if endpoint.Kind == "vless" && endpoint.Engine == "xray" && (endpoint.Transport == "xhttp" || endpoint.IsReality() && (endpoint.Transport == "" || endpoint.Transport == "tcp")) {
+			return endpoint.ClientFormat("xray")
+		}
 	}
 	if format == "shadowrocket-config" {
 		format = "shadowrocket"

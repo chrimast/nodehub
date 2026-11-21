@@ -13,6 +13,21 @@ function fixture(policy:Row){const source=JSON.stringify(policy);return vi.fn(as
  return {}
  })}
 const button=(w:any,text:string)=>w.findAll('button').find((b:any)=>b.text()===text)!
+it('uses full-width textarea styles in the policy tabs',async()=>{
+ const w=mount(Policies,{props:{api:fixture({})}})
+ try {
+  await flushPromises();await button(w,'＋ 添加策略').trigger('click');await flushPromises()
+  await button(w,'基础配置').trigger('click')
+  expect(w.get('section.policy-tab-panel h3').text()).toBe('基础配置')
+  await button(w,'DNS').trigger('click')
+  expect(w.get('section.policy-tab-panel h3').text()).toBe('DNS 配置')
+  const dnsFields=w.findAll('section.policy-tab-panel .fields.dns-grid label > textarea')
+  expect(dnsFields.map(field=>field.attributes('aria-label'))).toEqual(['主要 DNS（每行一个，可用 #策略组）','引导 DNS','节点域名 DNS','直连 DNS','后备 DNS','Fake IP 排除域名'])
+  await button(w,'原生覆盖 / 转换预览').trigger('click')
+  const native=w.get('section.policy-tab-panel label.wide-field > textarea.native-preview')
+  expect(native.element.parentElement?.textContent).toContain('各客户端原生覆盖 JSON')
+ } finally {w.unmount()}
+})
 it('edits a single rule, paginates and saves the original scope without losing other sections',async()=>{
  const policy={basic:{'mixed-port':7890},dns:{nameserver:['1.1.1.1']},'proxy-groups':[{name:'choice',type:'select',proxies:['ALL']}],rules:[...Array.from({length:50},(_,i)=>`DOMAIN-SUFFIX,d${i}.example,choice`),'MATCH,choice']}
  const api=fixture(policy),w=mount(Policies,{props:{api}});await flushPromises();await button(w,'编辑').trigger('click');await flushPromises();expect(w.findAll('.rule-list li')).toHaveLength(25);await button(w,'下一页').trigger('click');expect(w.text()).toContain('d25.example');await w.get('[aria-label="编辑规则 26"]').trigger('click');await w.get('[aria-label="规则匹配内容"]').setValue('changed.example');await button(w,'保存此规则到草稿').trigger('click');await w.get('form').trigger('submit');await flushPromises();const body=api.mock.calls.find(c=>c[0]==='client-policies/p'&&c[1]==='PUT')![2];expect(body).toMatchObject({version:4,user_id:'u',client_id:'mihomo'});const saved=JSON.parse(body.source);expect(saved.rules[25]).toBe('DOMAIN-SUFFIX,changed.example,choice');expect(saved.rules.at(-1)).toBe('MATCH,choice');expect(saved.basic['mixed-port']).toBe(7890);expect(saved.dns.nameserver).toEqual(['1.1.1.1']);w.unmount()
@@ -67,4 +82,24 @@ it('converts an old name binding into editable per-family choices without leavin
  const saved=JSON.parse(api.mock.calls.find(c=>c[0]==='client-policies/p'&&c[1]==='PUT')![2].source)
  expect(saved['proxy-groups'][0].proxies).toEqual(['endpoint:n1:ipv4','DIRECT'])
  w.unmount()
+})
+
+
+it('previews a dedicated policy with the selected client and clears stale output',async()=>{
+ const base=fixture({rules:['MATCH,DIRECT']})
+ const api=vi.fn(async(path:string,method='GET',body?:any)=>{
+  if(path==='client-catalog')return [{id:'mihomo',name:'Mihomo',full_config:true},{id:'xray',name:'Xray',full_config:true}]
+  if(path==='client-policies/preview')return {text:'preview for '+body.client_id}
+  return base(path,method,body)
+ })
+ const w=mount(Policies,{props:{api}})
+ try {
+  await flushPromises();await button(w,'＋ 添加策略').trigger('click');await flushPromises()
+  const target=w.findAll('select').find(s=>s.find('option[value=all]').exists())!
+  await target.setValue('xray');await button(w,'原生覆盖 / 转换预览').trigger('click')
+  await button(w,'转换预览').trigger('click');await flushPromises()
+  expect(w.get('pre.native-preview').text()).toBe('preview for xray')
+  await target.setValue('mihomo')
+  expect(w.find('pre.native-preview').exists()).toBe(false)
+ } finally {w.unmount()}
 })

@@ -200,6 +200,9 @@ func (s *Server) userSubscription(w http.ResponseWriter, r *http.Request) error 
 	var name string
 	var expiry time.Time
 	if e = tx.QueryRow(r.Context(), `SELECT name,expires_at FROM proxy_users WHERE tenant_id=$1 AND id=$2 AND enabled AND expires_at>now() FOR UPDATE`, tenant, user).Scan(&name, &expiry); e != nil {
+		if e == store.ErrNoRows {
+			return bad("用户不存在、已停用或已到期，请刷新用户列表后重试")
+		}
 		return e
 	}
 	var id string
@@ -240,6 +243,9 @@ func (s *Server) userSubscription(w http.ResponseWriter, r *http.Request) error 
 			return e
 		}
 	} else if e != nil {
+		if e == store.ErrNoRows {
+			return bad("用户订阅记录暂不可用，请重试或联系管理员")
+		}
 		return e
 	} else {
 		plain, err := live.Open(s.MasterKey, sealed)

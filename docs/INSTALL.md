@@ -94,7 +94,7 @@ bash scripts/run-native.sh agent
 # PowerShell： ./scripts/run-native.ps1 -Role agent
 ```
 
-Linux常驻：`sudo bash scripts/install-agent-linux.sh`。拒绝覆盖旧服务；引擎复制到root只读/opt/harbor/engines，状态/var/lib/harbor/live由普通harbor用户写入。查看 `journalctl -u harbor-agent`。Alpine/OpenRC可使用前台命令，由管理员按发行版配置守护服务。
+Linux 常驻：`sudo bash scripts/install-agent-linux.sh`。新安装使用 `nodehub-agent.service`，发现已有新旧单元或 Agent 配置时会停止安装。引擎复制到 root 只读 `/opt/harbor/engines`，状态 `/var/lib/harbor/live` 由普通 `harbor` 用户写入。查看 `journalctl -u nodehub-agent.service`；旧安装请用 `journalctl -u harbor-agent.service`。Alpine/OpenRC 可使用前台命令，由管理员按发行版配置守护服务。
 
 Windows常驻：`./scripts/install-agent-windows.ps1` 创建当前普通用户的HarborAgent登录计划任务，不提权、不绕过执行策略。用户未登录或退出后不保证常驻，不冒充Windows系统服务。修改凭据后重启任务；企业策略阻止脚本时采用组织允许的签名方式。Windows防火墙规则由管理员按实际端口配置，脚本不自动放行。
 
@@ -132,7 +132,7 @@ sudo python3 /opt/harbor/domain-sync.py \
 ## 停止与恢复
 
 - Compose stop/down保留PG卷；不要加-v。
-- Linux Agent：systemctl stop harbor-agent；Windows停止HarborAgent任务或前台Agent，会清理受管引擎。
+- Linux Agent：`systemctl stop nodehub-agent.service`；旧安装请用 `systemctl stop harbor-agent.service`。Windows 停止 HarborAgent 任务或前台 Agent，会清理受管引擎。
 - 域名失败检查journalctl、DNS、证书和nginx -t。修复后可删除该自有vhost的.state.json解除退避，不删除其他站点。
 - 恢复必须同时具备数据库与原MASTER_KEY；生成新密钥不能解密旧服务。
 

@@ -104,7 +104,7 @@ func run(ctx context.Context) error {
 					}
 				}
 			}
-			data, _, err := call(ctx, "heartbeat", map[string]any{"cleanup_capable": os.Getenv("RETIRE_MARKER") != "", "mode": mode, "version": buildinfo.Version, "platform": runtime.GOOS + "/" + runtime.GOARCH, "addresses": addresses, "control_origin": connection.origin()})
+			data, _, err := call(ctx, "heartbeat", map[string]any{"cleanup_capable": os.Getenv("RETIRE_MARKER") != "", "mode": mode, "version": buildinfo.AgentVersion, "platform": runtime.GOOS + "/" + runtime.GOARCH, "addresses": addresses, "control_origin": connection.origin()})
 			e = err
 			if e == nil {
 				var endpointSettings struct {
@@ -250,7 +250,7 @@ func idleDelay(n int, cap time.Duration) time.Duration {
 
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--version" {
-		fmt.Println(buildinfo.Version)
+		fmt.Println(buildinfo.AgentVersion)
 		return
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

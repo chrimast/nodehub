@@ -22,7 +22,7 @@ REPOSITORY = "czy-code-923/czy-code"
 BASE = f"https://github.com/{REPOSITORY}/releases/download/v{VERSION}-distribution/"
 OLD_BASE = f"https://github.com/{REPOSITORY}/releases/download/v{PREVIOUS}-distribution/"
 PINNED = {'starhub-v0238-update.zip': 'edc21375cac23da963205d142a869044f7c3248a45a76b50821b63b1236613a4'}
-ENGINE_VERSIONS = {"sing-box": "v1.14.4", "xray": "v26.10.21", "frp": "v0.71.1"}
+ENGINE_VERSIONS = {"sing-box": "v1.14.4", "xray": "v26.10.31", "frp": "v0.71.1"}
 
 
 def digest(path):

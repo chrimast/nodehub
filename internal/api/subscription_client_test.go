@@ -30,6 +30,25 @@ func TestSubscriptionClientPrecedence(t *testing.T) {
 	}
 }
 
+func TestSubscriptionClientIdentity(t *testing.T) {
+	for _, tc := range []struct{ query, ua, id string }{
+		{"?format=naive", "", "naive-proxy"},
+		{"?format=mihomo-nodes", "", "nekobox"},
+		{"?format=auto", "SFI/1.13", "sfa"},
+		{"", "SFA/1.14", "sfa"},
+		{"", "sing-box/1.14", "sing-box-latest"},
+		{"", "Clash-Verge/2.4", "clash-verge"},
+		{"?client=clash-verge-rev", "", "clash-verge"},
+	} {
+		r := httptest.NewRequest("GET", "http://localhost/s/test"+tc.query, nil)
+		r.Header.Set("User-Agent", tc.ua)
+		got, err := selectedClient(r, "")
+		if err != nil || got.ID != tc.id {
+			t.Errorf("%v: got %s, %v", tc, got.ID, err)
+		}
+	}
+}
+
 func TestPolicyAddressFamilyUsesCanonicalIP(t *testing.T) {
 	for address, family := range map[string]string{"::ffff:192.0.2.1": "ipv4", "2001:db8::1": "ipv6", "192.0.2.1": "ipv4", "node.example.test": "dns"} {
 		if policyFamily(address) != family {

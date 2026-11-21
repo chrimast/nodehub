@@ -28,6 +28,9 @@ type Account struct {
 }
 
 func (s Spec) ClientFormat(format string) error {
+	if s.Encryption != "" && format != "xray" {
+		return errors.New("VLESS Encryption requires a compatible Xray client")
+	}
 	if s.Kind == "snell" && s.UserKey != "" && format != "sing-box" {
 		return errors.New("multi-user Snell requires sing-box 1.14+ with userkey")
 	}
@@ -60,7 +63,7 @@ func (s Spec) ClientFormat(format string) error {
 		return errors.New("this protocol has no verified Shadowrocket URI export; select sing-box or Mihomo")
 	}
 	if s.IsReality() && s.Engine == "xray" && format != "xray" {
-		return errors.New("Xray 26.10.21 REALITY requires a compatible PQ handshake: select Xray JSON or use sing-box REALITY for sing-box/Mihomo clients")
+		return errors.New("Xray 26.10.31 REALITY requires a compatible PQ handshake: select Xray JSON or use sing-box REALITY for sing-box/Mihomo clients")
 	}
 	if format == "xray" && !EngineSupports("xray", s.Kind) && s.Kind != "shadowsocks" {
 		return errors.New("this protocol is unsupported in Xray client JSON")
@@ -85,8 +88,11 @@ func (s Spec) validateSecurity(client bool) error {
 	if e := s.validateOptions(); e != nil {
 		return e
 	}
-	if s.Flow != "" && (s.Kind != "vless" || s.Flow != "xtls-rprx-vision" || s.Transport != "" && s.Transport != "tcp" || (!s.UsesTLS() && !s.IsReality())) {
-		return errors.New("Vision requires VLESS over TCP with TLS or REALITY")
+	if err := s.validateVLESSEncryption(client); err != nil {
+		return err
+	}
+	if s.Flow != "" && (s.Kind != "vless" || s.Flow != "xtls-rprx-vision" || (s.Transport != "" && s.Transport != "tcp" && s.Encryption == "") || (!s.UsesTLS() && !s.IsReality())) {
+		return errors.New("Vision requires VLESS TCP with TLS/REALITY, or XHTTP with VLESS Encryption")
 	}
 	if s.IsReality() {
 		if !(s.Kind == "vless" || s.Engine == "xray" && (s.Kind == "trojan" || s.Kind == "vmess")) || !s.validLayer() || s.Reality == nil || !Address(s.ServerName) || s.Certificate != "" || s.PrivateKey != "" {
@@ -181,6 +187,7 @@ func (s Spec) PublicReality() *Reality {
 	return &r
 }
 func (s *Spec) StripServerSecrets() {
+	s.Decryption = ""
 	s.PrivateKey = ""
 	s.Reality = s.PublicReality()
 	s.Accounts = nil

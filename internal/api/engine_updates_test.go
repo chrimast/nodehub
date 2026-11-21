@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"vps-control/internal/engine"
+	"vps-control/internal/live"
 )
 
 func TestEngineUpdateQueueAndAgentIsolation(t *testing.T) {
@@ -63,4 +64,24 @@ func TestEngineUpdateQueueAndAgentIsolation(t *testing.T) {
 		t.Fatal(state)
 	}
 	call("POST", "hosts/"+a+"/engine-updates", map[string]any{"engine": "sing-box", "version": "https://evil.test/core"}, "", 400)
+}
+
+func TestKernelListReturnsAgentCapabilities(t *testing.T) {
+	s := testControlDB(t)
+	h := api018{t, s}
+	host := obj018(h.call("POST", "hosts", map[string]string{"name": "kernel probe"}, 201, nil))
+	h.call("POST", "agent/live/sync", map[string]any{"bundle_mode": true, "capabilities": []live.Capability{{Engine: "xray", Available: true, Version: "Xray 26.10.31"}, {Engine: "sing-box"}}}, 200, host)
+	var rows []struct {
+		Engine, Version  string
+		Available, Ready bool
+		Current          any
+		CheckedAt        string `json:"checked_at"`
+	}
+	raw := h.call("GET", "hosts/"+host["id"].(string)+"/kernels", nil, 200, nil)
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || rows[0].Engine != "sing-box" || rows[0].Available || rows[0].Ready || rows[1].Engine != "xray" || rows[1].Version != "Xray 26.10.31" || !rows[1].Ready || !rows[1].Available || rows[1].CheckedAt == "" || rows[1].Current != false {
+		t.Fatalf("unexpected kernel inventory: %s", raw)
+	}
 }

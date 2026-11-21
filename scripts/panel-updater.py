@@ -218,7 +218,10 @@ class Updater:
                 unit=trusted(Path('/etc/systemd/system/starhub-gateway.service'))
                 if not unit.read_text().startswith('# starhub-owned-gateway-v1\n') or str(root/'scripts/gateway-worker.py') not in unit.read_text():raise ValueError('Gateway unit ownership mismatch')
                 self.job['units'][:0]=['starhub-gateway.timer','starhub-gateway.service']
-            if self.i['layout']=='legacy' and active('harbor-agent.service'):self.job['units'].insert(0,'harbor-agent.service')
+            if self.i['layout']=='legacy':
+                agents=[unit for unit in ('nodehub-agent.service','harbor-agent.service') if active(unit)]
+                if len(agents)>1:raise ValueError('Both Agent units are active; resolve the service conflict before updating')
+                self.job['units'][:0]=agents
             self.save()
             # Stop writes before snapshot; restart original services if backup fails.
             self.job['services_stopped']=True;self.save()

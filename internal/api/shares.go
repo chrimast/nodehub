@@ -167,6 +167,7 @@ func (s *Server) serveSubscription(w http.ResponseWriter, r *http.Request) error
 	extra := profile.Extra
 	if pc, ok := clientByID(profile.Format); !ok || pc.Format != format {
 		extra = nil
+		profile.Selection = "select"
 	}
 	nodes := []clientpolicy.Node{}
 	warnings := []string{}
@@ -291,6 +292,10 @@ func (s *Server) serveSubscription(w http.ResponseWriter, r *http.Request) error
 		for _, address := range addresses {
 			endpoint := spec
 			endpoint.Address = address
+			if err := runtimeClientCompatibility(r, client, endpoint); err != nil {
+				excluded++
+				continue
+			}
 			if format == "naive" && net.ParseIP(address) != nil && address != spec.ServerName {
 				target := address
 				if strings.Contains(address, ":") {
@@ -299,10 +304,6 @@ func (s *Server) serveSubscription(w http.ResponseWriter, r *http.Request) error
 				naiveMap = "MAP " + spec.ServerName + " " + target
 			}
 			tag := clientpolicy.ExportName(name, address)
-			if err := runtimeClientCompatibility(r, client, endpoint); err != nil {
-				excluded++
-				continue
-			}
 			sb, mh, uri, err := endpoint.Client(tag)
 			if err != nil {
 				return err
@@ -396,13 +397,6 @@ func (s *Server) serveSubscription(w http.ResponseWriter, r *http.Request) error
 			return err
 		}
 	case "naive":
-		policy, _, _, _, err := s.selectedPolicy(r, user, client.ID)
-		if err != nil {
-			return err
-		}
-		if policy != nil && r.URL.Query().Get("policy") != "nodes-only" {
-			return problem{422, "NaiveProxy does not support routing groups; add policy=nodes-only"}
-		}
 		if len(uris) != 1 {
 			return problem{422, "NaiveProxy requires exactly one authorized compatible node"}
 		}
@@ -428,11 +422,10 @@ func (s *Server) serveSubscription(w http.ResponseWriter, r *http.Request) error
 		if err != nil {
 			return problem{422, err.Error()}
 		}
-		raw := native[format]
-		if len(extra) > 0 {
-			raw = extra
+		config, err = shadowrocketOptions(config, native[format])
+		if err == nil {
+			config, err = shadowrocketOptions(config, extra)
 		}
-		config, err = shadowrocketOptions(config, raw)
 		if err != nil {
 			return problem{422, err.Error()}
 		}

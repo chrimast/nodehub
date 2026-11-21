@@ -1,12 +1,13 @@
 package api
 
 import (
-	"vps-control/internal/store"
 	"encoding/json"
 	"net/http"
+
 	"sync"
 	"time"
 	"vps-control/internal/controlorigin"
+	"vps-control/internal/store"
 )
 
 var originProofLimit struct {
@@ -30,9 +31,10 @@ func (s *Server) verifyControlOrigin(w http.ResponseWriter, r *http.Request) err
 		return problem{429, "origin verification busy"}
 	}
 	var b struct {
-		Host   string `json:"host_id"`
-		Nonce  string `json:"nonce"`
-		Origin string `json:"origin"`
+		Host      string `json:"host_id"`
+		Nonce     string `json:"nonce"`
+		Origin    string `json:"origin"`
+		AllowHTTP bool   `json:"allow_insecure_http"`
 	}
 	if e := decodeBounded(w, r, &b, 1024); e != nil {
 		return e
@@ -40,11 +42,11 @@ func (s *Server) verifyControlOrigin(w http.ResponseWriter, r *http.Request) err
 	if len(b.Host) != 32 || !ticketPattern.MatchString(b.Nonce) {
 		return bad("invalid origin challenge")
 	}
-	origin, err := controlorigin.Normalize(b.Origin, false)
+	origin, err := controlorigin.Normalize(b.Origin, b.AllowHTTP)
 	if err != nil {
 		return bad("invalid origin challenge address")
 	}
-	allowed, err := s.agentOrigins(r)
+	allowed, err := s.configuredAgentOrigins(r)
 	if err != nil {
 		return err
 	}
@@ -55,9 +57,11 @@ func (s *Server) verifyControlOrigin(w http.ResponseWriter, r *http.Request) err
 			permitted = true
 		}
 	}
-	if current, e := s.managementOrigin(r); e == nil && current == origin {
-		permitted = true
+	if current, e := s.siteOrigin(r, false); e == nil {
+		configured, e := controlorigin.Normalize(current, b.AllowHTTP)
+		permitted = permitted || (e == nil && configured == origin)
 	}
+
 	if !permitted {
 		return problem{403, "origin not configured on this control server"}
 	}
@@ -70,6 +74,18 @@ func (s *Server) verifyControlOrigin(w http.ResponseWriter, r *http.Request) err
 }
 
 func (s *Server) agentOrigins(r *http.Request) ([]string, error) {
+	origins, err := s.configuredAgentOrigins(r)
+	if err == nil && len(origins) == 0 {
+		if origin, e := s.managementOrigin(r); e == nil {
+			if u, e := controlorigin.Normalize(origin, false); e == nil {
+				origins = append(origins, u)
+			}
+		}
+	}
+	return origins, err
+}
+
+func (s *Server) configuredAgentOrigins(r *http.Request) ([]string, error) {
 	var raw json.RawMessage
 	if e := s.DB.QueryRow(r.Context(), `SELECT agent_origins FROM site_settings WHERE tenant_id=$1`, tenant).Scan(&raw); e != nil {
 		if e == store.ErrNoRows {
@@ -80,13 +96,6 @@ func (s *Server) agentOrigins(r *http.Request) ([]string, error) {
 	origins := []string{}
 	if e := json.Unmarshal(raw, &origins); e != nil {
 		return nil, e
-	}
-	if len(origins) == 0 {
-		if origin, e := s.managementOrigin(r); e == nil {
-			if u, e := controlorigin.Normalize(origin, false); e == nil {
-				origins = append(origins, u)
-			}
-		}
 	}
 	return origins, nil
 }

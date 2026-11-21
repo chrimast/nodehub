@@ -16,7 +16,7 @@ it('never automatically replaces an already connected host credential',async()=>
 it('checks an existing offline host without generating a replacement credential',async()=>{
  const api=vi.fn(async(p:string)=>p==='hosts'?[{id:'b',online:false}]:{state:'waiting'})
  wrapper=mount(HostConnect,{props:{host:{id:'b',name:'Existing',agent_version:'0.23.0'},api}});await flushPromises()
- expect(api).toHaveBeenCalledWith('hosts');expect(api).toHaveBeenCalledTimes(1);expect(wrapper.text()).toContain('主机暂时离线');expect(wrapper.text()).toContain('systemctl restart harbor-agent.service')
+ expect(api).toHaveBeenCalledWith('hosts');expect(api).toHaveBeenCalledTimes(1);expect(wrapper.text()).toContain('主机暂时离线');expect(wrapper.text()).toContain('systemctl restart nodehub-agent.service');expect(wrapper.get('pre.install-command + p').text()).toContain('升级后，服务名为 nodehub-agent.service');expect(wrapper.text()).not.toContain('harbor-agent.service')
  await wrapper.findAll('button').find(b=>b.text()==='检查连接')!.trigger('click');await flushPromises();expect(api).toHaveBeenCalledTimes(2)
 })
 it('offers repair and versioned Agent upgrade without rotating host credentials',async()=>{
@@ -27,6 +27,11 @@ it('offers repair and versioned Agent upgrade without rotating host credentials'
  expect(wrapper.get('textarea').element.value).toBe('pinned-identity-preserving-command')
  await wrapper.findAll('button').find(b=>b.text()==='生成 Agent 升级命令')!.trigger('click');await flushPromises()
  expect(api).toHaveBeenCalledWith('hosts/b/repair-command?upgrade=1')
+ await wrapper.get('#allow-agent-http').setValue(true)
+ for(const [label,query] of [['生成控制端地址修复命令',''],['生成 Agent 升级命令','upgrade=1&'],['安装 / 更新端口跳跃助手','upgrade=1&hopping=1&']]){
+  await wrapper.findAll('button').find(b=>b.text()===label)!.trigger('click');await flushPromises()
+  expect(api).toHaveBeenCalledWith(`hosts/b/repair-command?${query}allow_insecure_http=1`)
+ }
  expect(api.mock.calls.every(([p])=>!p.includes('enrollment'))).toBe(true)
 })
 

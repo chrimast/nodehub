@@ -28,7 +28,7 @@ class EngineInstallerTests(unittest.TestCase):
             if 'codeload' in url:return source.getvalue()
             repo=next(v for v in self.archives if '/'+v+'/' in url)
             if '/releases/latest' in url or '/releases/tags/' in url:
-                version={'SagerNet/sing-box':'v1.14.4','fatedier/frp':'v0.71.1','XTLS/Xray-core':'v26.10.21'}[repo]
+                version={'SagerNet/sing-box':'v1.14.4','fatedier/frp':'v0.71.1','XTLS/Xray-core':'v26.10.31'}[repo]
                 name={'SagerNet/sing-box':'sing-box-1.14.4-linux-amd64.tar.gz','fatedier/frp':'frp_0.71.1_linux_amd64.tar.gz','XTLS/Xray-core':'Xray-linux-64.zip'}[repo]
                 raw=self.archives[repo];asset={'name':name,'size':len(raw),'digest':'sha256:'+hashlib.sha256(raw).hexdigest(),'browser_download_url':'https://github.com/'+repo+'/releases/download/'+version+'/'+name}
                 return json.dumps({'tag_name':version,'prerelease':False,'assets':[] if self.missing else [asset]}).encode()

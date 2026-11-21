@@ -6,3 +6,6 @@ demo-agent.json
 *.exe
 engines
 state
+agent-releases
+ADMIN_TOKEN.txt
+试用登录.txt

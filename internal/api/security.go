@@ -1,10 +1,24 @@
 package api
 
-import "vps-control/internal/live"
+import (
+	"fmt"
+	"net/http"
+	"vps-control/internal/live"
+	"vps-control/internal/store"
+)
 
 func applySecurity(s *live.Spec, b liveInput) error {
 	s.ProtocolOptions = b.ProtocolOptions
 	s.Flow = b.Flow
+	if b.VLESSEncryption != nil {
+		if !*b.VLESSEncryption {
+			s.Encryption, s.Decryption = "", ""
+		} else if s.Encryption == "" {
+			if err := s.EnableVLESSEncryption(); err != nil {
+				return err
+			}
+		}
+	}
 	s.ALPN = b.ALPN
 	s.Congestion = b.Congestion
 	s.WSHost = b.WSHost
@@ -38,6 +52,26 @@ func applySecurity(s *live.Spec, b liveInput) error {
 		s.PrivateKey = ""
 	} else {
 		s.Reality = nil
+	}
+	return nil
+}
+
+func encryptionCapable(version string) bool {
+	var major, minor, patch int
+	n, _ := fmt.Sscanf(version, "%d.%d.%d", &major, &minor, &patch)
+	return n == 3 && (major > 0 || minor > 25 || minor == 25 && patch >= 7)
+}
+
+func requireVLESSAgent(r *http.Request, tx store.Tx, host string, spec live.Spec) error {
+	if spec.Encryption == "" && (spec.Outbound == nil || spec.Outbound.Encryption == "") {
+		return nil
+	}
+	var version string
+	if err := tx.QueryRow(r.Context(), `SELECT agent_version FROM hosts WHERE tenant_id=$1 AND id=$2`, tenant, host).Scan(&version); err != nil {
+		return err
+	}
+	if !encryptionCapable(version) {
+		return problem{409, "VLESS Encryption 需要 Agent 0.25.7 或以上，请先升级 Agent"}
 	}
 	return nil
 }

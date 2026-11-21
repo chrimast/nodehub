@@ -36,7 +36,8 @@ def remove(path,roots):
     elif path.exists():path.unlink()
 
 def owned_units(root,layout):
-    names=['starhub-control.service'] if layout=='quickstart' else ['harbor-control.service','harbor-agent.service','harbor-domain-sync.service','harbor-domain-sync.timer','harbor-managed-gateway.service','harbor-managed-gateway.timer','harbor-backup.service','harbor-backup.timer']
+    agent_names=('nodehub-agent.service','harbor-agent.service')
+    names=['starhub-control.service'] if layout=='quickstart' else ['harbor-control.service',*agent_names,'harbor-domain-sync.service','harbor-domain-sync.timer','harbor-managed-gateway.service','harbor-managed-gateway.timer','harbor-backup.service','harbor-backup.timer']
     names += ['starhub-panel-rescue.service']
     names += ['starhub-panel-updater.service','starhub-panel-updater.timer']
     names += ['starhub-gateway.service','starhub-gateway.timer']
@@ -46,6 +47,7 @@ def owned_units(root,layout):
         if not path.exists():continue
         if path.is_symlink():raise ValueError('Refusing symlinked unit: '+name)
         text=path.read_text()
+        if name in agent_names and 'EnvironmentFile=/etc/harbor-agent/agent.env' in text.splitlines():continue # Separately enrolled Agent.
         if name.endswith('.service') and str(root) not in text and not any(p in text for p in ['/etc/harbor/','/usr/local/libexec/harbor-']):
             raise ValueError('Unit ownership could not be verified: '+name)
         if name.endswith('.timer') and name.replace('.timer','.service') not in text:
@@ -73,7 +75,7 @@ def plan(root,layout,purge,windows=False):
     roots=[root]+([Path('/etc/harbor'),Path('/var/lib/harbor')] if layout=='legacy' and purge else [])
     if layout=='legacy':
         helper=Path('/usr/local/libexec/harbor-agent-cleanup')
-        if helper.exists():
+        if helper.exists() and not Path('/etc/harbor-agent-cleanup.json').exists():
             if helper.is_symlink() or not helper.is_file():raise ValueError('Unexpected cleanup helper type')
             paths.append(helper);roots.append(helper)
     for path in paths:bounded_path(path,roots)

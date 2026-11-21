@@ -76,7 +76,9 @@ func (s Spec) validateProxy() error {
 	return nil
 }
 func (s Spec) renderProxy() (string, map[string][]byte, error) {
-	if s.Engine == "xray" && (s.TCPFastOpen || s.TCPMultiPath || s.TCPKeepAlive != "" || s.TLSHandshakeTimeout != "") { return "", nil, errors.New("latest listener options require sing-box") }
+	if s.Engine == "xray" && (s.TCPFastOpen || s.TCPMultiPath || s.TCPKeepAlive != "" || s.TLSHandshakeTimeout != "") {
+		return "", nil, errors.New("latest listener options require sing-box")
+	}
 	if extraProtocol(s.Kind) && s.Engine != "xray" {
 		return s.renderExtra()
 	}
@@ -84,9 +86,15 @@ func (s Spec) renderProxy() (string, map[string][]byte, error) {
 		return s.renderXray()
 	}
 	inbound := map[string]any{"type": s.Kind, "tag": "entry", "listen": s.Listen, "listen_port": s.Port}
-	if s.TCPFastOpen { inbound["tcp_fast_open"] = true }
-	if s.TCPMultiPath { inbound["tcp_multi_path"] = true }
-	if s.TCPKeepAlive != "" { inbound["tcp_keep_alive"] = s.TCPKeepAlive }
+	if s.TCPFastOpen {
+		inbound["tcp_fast_open"] = true
+	}
+	if s.TCPMultiPath {
+		inbound["tcp_multi_path"] = true
+	}
+	if s.TCPKeepAlive != "" {
+		inbound["tcp_keep_alive"] = s.TCPKeepAlive
+	}
 	files := map[string][]byte{}
 	if s.Kind == "snell" {
 		inbound["version"] = s.snellVersion()
@@ -105,10 +113,18 @@ func (s Spec) renderProxy() (string, map[string][]byte, error) {
 		files["tls.crt"] = []byte(s.Certificate)
 		files["tls.key"] = []byte(s.PrivateKey)
 		tls := map[string]any{"enabled": true, "certificate_path": "tls.crt", "key_path": "tls.key"}
-		if s.TLSHandshakeTimeout != "" { tls["handshake_timeout"] = s.TLSHandshakeTimeout }
-		if s.TCPFastOpen { inbound["tcp_fast_open"] = true }
-		if s.TCPMultiPath { inbound["tcp_multi_path"] = true }
-		if s.TCPKeepAlive != "" { inbound["tcp_keep_alive"] = s.TCPKeepAlive }
+		if s.TLSHandshakeTimeout != "" {
+			tls["handshake_timeout"] = s.TLSHandshakeTimeout
+		}
+		if s.TCPFastOpen {
+			inbound["tcp_fast_open"] = true
+		}
+		if s.TCPMultiPath {
+			inbound["tcp_multi_path"] = true
+		}
+		if s.TCPKeepAlive != "" {
+			inbound["tcp_keep_alive"] = s.TCPKeepAlive
+		}
 		if len(s.ALPN) > 0 {
 			tls["alpn"] = s.ALPN
 		}
@@ -143,8 +159,12 @@ func (s Spec) renderProxy() (string, map[string][]byte, error) {
 			user["password"] = s.Password
 			inbound["congestion_control"] = s.congestion()
 			inbound["zero_rtt_handshake"] = false
-			if s.TUICAuthTimeout != "" { inbound["auth_timeout"] = s.TUICAuthTimeout }
-			if s.TUICHeartbeatSec > 0 { inbound["heartbeat"] = strconv.Itoa(s.TUICHeartbeatSec)+"s" }
+			if s.TUICAuthTimeout != "" {
+				inbound["auth_timeout"] = s.TUICAuthTimeout
+			}
+			if s.TUICHeartbeatSec > 0 {
+				inbound["heartbeat"] = strconv.Itoa(s.TUICHeartbeatSec) + "s"
+			}
 			tls["alpn"] = []string{"h3"}
 		default:
 			user["password"] = s.Password
@@ -157,14 +177,20 @@ func (s Spec) renderProxy() (string, map[string][]byte, error) {
 				inbound["down_mbps"] = s.DownMbps
 			}
 			if s.HY2ObfsMode == "gecko" {
-				obfs := map[string]any{"type":"gecko"}
-				if s.HY2ObfsMinPacket > 0 { obfs["min_packet_size"] = s.HY2ObfsMinPacket }
-				if s.HY2ObfsMaxPacket > 0 { obfs["max_packet_size"] = s.HY2ObfsMaxPacket }
+				obfs := map[string]any{"type": "gecko"}
+				if s.HY2ObfsMinPacket > 0 {
+					obfs["min_packet_size"] = s.HY2ObfsMinPacket
+				}
+				if s.HY2ObfsMaxPacket > 0 {
+					obfs["max_packet_size"] = s.HY2ObfsMaxPacket
+				}
 				inbound["obfs"] = obfs
 			} else if s.HY2Obfs != "" {
 				inbound["obfs"] = map[string]any{"type": "salamander", "password": s.HY2Obfs}
 			}
-			if s.HY2ServerBBRProfile != "" { inbound["bbr_profile"] = s.HY2ServerBBRProfile }
+			if s.HY2ServerBBRProfile != "" {
+				inbound["bbr_profile"] = s.HY2ServerBBRProfile
+			}
 		}
 		inbound["users"] = []any{user}
 		if s.ManagedUsers {
@@ -281,7 +307,7 @@ func (s Spec) Client(tag string) (map[string]any, map[string]any, string, error)
 			mh["uuid"] = s.UUID
 			mh["network"] = "tcp"
 			u.User = url.User(s.UUID)
-			q.Set("encryption", "none")
+			q.Set("encryption", s.ClientEncryption())
 			q.Set("type", "tcp")
 		case "tuic":
 			sb["uuid"] = s.UUID
@@ -371,6 +397,10 @@ func (s Spec) Client(tag string) (map[string]any, map[string]any, string, error)
 	}
 	if s.Transport == "httpupgrade" || s.Transport == "http" || s.Transport == "xhttp" || s.Transport == "kcp" {
 		q.Set("type", s.Transport)
+		if s.Engine == "xray" && s.Transport == "xhttp" && s.XHTTPPadding != "" {
+			extra, _ := json.Marshal(map[string]string{"xPaddingBytes": s.XHTTPPadding})
+			q.Set("extra", string(extra))
+		}
 		if s.Path != "" {
 			q.Set("path", s.Path)
 		}
